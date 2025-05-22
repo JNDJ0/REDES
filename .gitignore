@@ -1,0 +1,6 @@
+server
+sensor
+
+*.o
+
+.vscode/

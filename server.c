@@ -24,7 +24,8 @@ int main(int argc, char **argv){
     char buffer[256];
     socklen_t clilen;
     struct sockaddr_in p2p_addr, serv_addr, cli_addr;
-    int p2p_port, sensor_port, n, client_socket, new_socket;
+    int p2p_port, sensor_port, n, client_socket, new_socket, p2p_connections = 0, sensor_connections = 0;
+
     // Lendo entradas do terminal
     ip = argv[1];
     p2p_port = atoi(argv[2]);
@@ -57,7 +58,7 @@ int main(int argc, char **argv){
         bzero(buffer, 256);
         n = read(client_socket, buffer, 255);
         if (n < 0) error("ERROR reading from socket");
-        if (strcmp(buffer, "kill\n") == 0){
+        if (strcmp(buffer, "kill") == 0){
             printf("Conexão encerrada pelo sensor.\n");
             close(client_socket);
             break;
@@ -70,7 +71,7 @@ int main(int argc, char **argv){
         fgets(buffer, 255, stdin);
         n = write(client_socket, buffer, strlen(buffer));
         // Caso seja kill, encerra conexão
-        if (strcmp(buffer, "kill\n") == 0){
+        if (strcmp(buffer, "kill") == 0){
             printf("Conexão encerrada pelo servidor.\n");
             close(client_socket);
             break;
