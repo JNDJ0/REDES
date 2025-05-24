@@ -39,12 +39,12 @@ int main(int argc, char **argv){
     // Fluxo de troca de mensagens entre sensor e servidor
     while(1){
         // Enviando mensagem para o servidor
-        printf("Escreva uma mensagem (kill para sair): ");
+        printf("Escreva um comando: ");
         bzero(buffer, 256);
         fgets(buffer, 255, stdin);
         n = write(server_socket, buffer, strlen(buffer));
         // Caso seja kill, encerra conexão
-        if (strcmp(buffer, "kill") == 0){
+        if (strcmp(buffer, "kill\n") == 0){
             printf("Conexão encerrada pelo sensor.\n");
             close(server_socket);
             break;
@@ -55,7 +55,7 @@ int main(int argc, char **argv){
         // Lendo mensagem recebida e exibindo, se for o caso
         n = read(server_socket, buffer, 255);
         if (n < 0) error("ERROR reading from socket");
-        if (strcmp(buffer, "kill") == 0){
+        if (strcmp(buffer, "kill\n") == 0){
             printf("Conexão encerrada pelo servidor.\n");
             close(server_socket);
             break;
