@@ -1,6 +1,7 @@
 #include <time.h>
 #include <netdb.h> 
 #include <stdio.h>
+#include "common.h"
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -21,7 +22,8 @@ void error(const char *msg){
     exit(1);
 }
 
-char* peer_id;
+char peer_id[10];
+char my_id[10];
 char* sensors_id[15];
 
 void GeneratePeerID(char *id_buffer) {
@@ -46,12 +48,11 @@ int P2PConnect(const char* ip, int port) {
     }
     peer_addr.sin_port = htons(port);
 
-    printf("P2P: Attempting to connect to eer at %s:%d...\n", ip, port);
     if (connect(connector_socket, (struct sockaddr *)&peer_addr, sizeof(peer_addr)) == 0) {
+        GeneratePeerID(peer_id);
+        printf("Peer %s connected\n", peer_id);
         peer_socket = connector_socket;
-        // Aqui você iniciaria a troca de mensagens REQ_CONNPEER, RES_CONNPEER
-        // Ex: send_req_connpeer(peer_socket);
-        //     receive_and_process_res_connpeer(peer_socket); // Recebe ID do peer, envia o seu
+        return peer_socket;
     } 
     else {
         close(connector_socket); 
@@ -86,75 +87,32 @@ int P2PConnect(const char* ip, int port) {
         peer_socket = accept(listener_socket, (struct sockaddr *)&connected_peer_addr, &peer_len);
 
         if (peer_socket < 0) {
-            error("P2P: ERROR on accept");
             close(listener_socket);
-            return -1;
+            error("P2P: ERROR on accept");
         }
-        // Conexão aceita! O listener_socket pode ser fechado pois não aceitará mais conexões P2P.
         close(listener_socket);
         char connected_peer_ip_str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &connected_peer_addr.sin_addr, connected_peer_ip_str, INET_ADDRSTRLEN);
-        printf("P2P: Peer connected from %s:%d.\n", connected_peer_ip_str, ntohs(connected_peer_addr.sin_port));
         // Aqui você esperaria o REQ_CONNPEER do peer que se conectou
         // Ex: receive_and_process_req_connpeer(peer_socket); // Recebe REQ, envia RES com ID, recebe RES com ID do peer
     }
 
     if (peer_socket > 0) {
-        // char p2p_id_assigned_by_me[PEER_ID_MAX_LEN]; // Supondo que você tenha PEER_ID_MAX_LEN
-        // GeneratePeerID(p2p_id_assigned_by_me); // Se a geração de ID é feita aqui
-        // printf("Peer (logical connection established), ID for them by me: %s\n", p2p_id_assigned_by_me);
+        // printf("setei ID\n");
+        GeneratePeerID(peer_id);
+        printf("Peer %s connected\n", peer_id);
         // A troca de IDs (PidS) deve seguir o protocolo do PDF após o socket TCP estar conectado.
+        return peer_socket; 
     }
-    return peer_socket; // Retorna o socket de dados P2P conectado
+    else {
+        close(peer_socket);
+        error("P2P: ERROR on peer connection");
+    }
+    return -1;
 }
-// int P2PConnect(char* ip, int port){
-//     printf("Conectando a %s:%d...\n", ip, port);
-//     socklen_t peer_len;
-//     struct sockaddr_in serv_addr, peer_addr;
-//     int connector_socket = socket(AF_INET, SOCK_STREAM, 0), listener_socket, peer_socket;
-//     if (connector_socket < 0) error("ERROR opening connector socket");
-
-//     // Tentando estabelecer conexões com algum peer já aberto
-//     bzero((char *) &peer_addr, sizeof(peer_addr));
-//     peer_addr.sin_family = AF_INET;
-//     if (inet_pton(AF_INET, ip, &peer_addr.sin_addr) <= 0) {
-//         close(connector_socket);
-//         error("ERROR invalid peer target IP address");
-//     }
-//     peer_addr.sin_port = htons(port);
-//     peer_len = sizeof(peer_addr);
-//     connector_socket = connect(connector_socket, (struct sockaddr *) &peer_addr, &peer_len);
-//     if (connector_socket == 0) peer_socket = connector_socket;
-//     // Caso não tenha nenhum aberto, começa a escutar por conexões
-//     else if (connector_socket < 0){
-//         listener_socket = socket(AF_INET, SOCK_STREAM, 0);
-//         int optval = 1;
-//         setsockopt(listener_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-//         if (listener_socket < 0) error("ERROR opening listener socket");
-//         printf("No peers found, starting to listen...\n");
-
-//         // Definindo endereço do socket para conexões p2p
-//         bzero((char *) &peer_addr, sizeof(peer_addr));
-//         peer_addr.sin_family = AF_INET;
-//         peer_addr.sin_addr.s_addr = inet_addr(ip);
-//         peer_addr.sin_port = htons(port);
-//         if (bind(listener_socket, (struct sockaddr *) &peer_addr, sizeof(peer_addr)) < 0){
-//             error("ERROR on binding");
-//         }
-
-//         listen(listener_socket, 5);
-//         peer_len = sizeof(peer_addr);
-//         listener_socket = accept(listener_socket, (struct sockaddr *) &peer_addr, &peer_len);
-//         if (listener_socket < 0) error("ERROR on accept");
-//         peer_socket = listener_socket;
-//     }
-//     GeneratePeerID(peer_id);
-//     printf("Peer %s connected\n", peer_id);
-//     return peer_socket;
-// }
 
 int SensorConnect(char *ip, int port){
-    srand(time(NULL));
+    srand(time(NULL) ^ getpid());
     socklen_t cli_len;
     struct sockaddr_in serv_addr, cli_addr;
     printf("Esperando conexão de sensores em %s:%d...\n", ip, port);
@@ -171,6 +129,8 @@ int SensorConnect(char *ip, int port){
     if (bind(sensor_socket, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0){
         error("ERROR on binding");
     }
+    int optval = 1;
+    setsockopt(sensor_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
 
     // Esperando conexão inicial sensor
     listen(sensor_socket, 5);
@@ -181,7 +141,23 @@ int SensorConnect(char *ip, int port){
     return sensor_socket;
 }
 
+void SendMessage(int type, char* payload, int socket_fd) {
+    message msg;
+    bzero(msg.payload, MAX_MSG_SIZE);
+    msg.type = type;
+    strncpy(msg.payload, payload, MAX_MSG_SIZE - 1);
+    msg.payload[MAX_MSG_SIZE - 1] = '\0'; 
+    int n = write(socket_fd, &msg, sizeof(msg));
+    if (n < 0) error("ERROR writing to socket");
+}
+
 int main(int argc, char **argv){
+    // Definindo seed para IDs
+    time_t current_time = time(NULL);
+    pid_t current_pid = getpid();
+    unsigned int seed = current_time ^ current_pid;
+    srand(seed);
+
     char* ip;
     char buffer[256];
     struct sockaddr_in peer_addr;
@@ -192,8 +168,16 @@ int main(int argc, char **argv){
     peer_port = atoi(argv[2]);
     sensor_port = atoi(argv[3]);
 
-    // Conectando aos sockets do peer e do sensor
-    peer_socket = P2PConnect(ip, peer_port, peer_port);
+    // Conectando aos sockets do peer e recebendo ID
+    peer_socket = P2PConnect(ip, peer_port);
+    SendMessage(RES_CONNPEER, peer_id, peer_socket);
+    message response;
+    n = read(peer_socket, &response, sizeof(response));
+    if (n < 0) error("ERROR reading from peer socket");
+    strncpy(my_id, response.payload, sizeof(my_id) - 1);
+    printf("New Peer ID: %s\n", my_id);
+    
+    // Conectando ao socket do sensor
     sensor_socket = SensorConnect(ip, sensor_port);
     
     // // Fluxo de troca de mensagens entre servidor e sensor

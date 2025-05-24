@@ -47,6 +47,7 @@
 #define ERROR_SENSOR_LIMIT_EXCEEDED "09"
 #define ERROR_SENSOR_NOT_FOUND "10"
 
+
 typedef enum {
     ROLE_SL,
     ROLE_SS,
@@ -69,74 +70,79 @@ typedef struct {
     int is_connected;
 } peer_conn_t;
 
-// Função que retorna o nome da área com base no ID de localização
-static inline const char* get_area_name(int loc_id) {
-    if (loc_id >= 1 && loc_id <= 3) return "Norte";
-    if (loc_id >= 4 && loc_id <= 5) return "Sul";
-    if (loc_id >= 6 && loc_id <= 7) return "Leste";
-    if (loc_id >= 8 && loc_id <= 10) return "Oeste";
-    if (loc_id == -1) return "Sem Area Definida";
-    return "Desconhecida";
-}
+typedef struct {
+    int type;
+    char payload[MAX_MSG_SIZE];
+} message;
 
-// Função que retorna o ID do grupo de área com base no ID de localização
-static inline int get_area_group_id(int loc_id) {
-    if (loc_id >= 1 && loc_id <= 3) return 1; // Norte
-    if (loc_id >= 4 && loc_id <= 5) return 2; // Sul
-    if (loc_id >= 6 && loc_id <= 7) return 3; // Leste
-    if (loc_id >= 8 && loc_id <= 10) return 4; // Oeste
-    return 0; // Sem Area Definida or Desconhecida
-}
+// // Função que retorna o nome da área com base no ID de localização
+// static inline const char* get_area_name(int loc_id) {
+//     if (loc_id >= 1 && loc_id <= 3) return "Norte";
+//     if (loc_id >= 4 && loc_id <= 5) return "Sul";
+//     if (loc_id >= 6 && loc_id <= 7) return "Leste";
+//     if (loc_id >= 8 && loc_id <= 10) return "Oeste";
+//     if (loc_id == -1) return "Sem Area Definida";
+//     return "Desconhecida";
+// }
 
-// Função que envia uma mensagem
-static inline int send_message(int sockfd, const char *message) {
-    char buffer; // +1 for newline, +1 for null terminator
-    strncpy(buffer, message, MAX_MSG_SIZE);
-    buffer = '\0'; // Ensure null termination if message is too long
-    strcat(buffer, "\n");
-    if (send(sockfd, buffer, strlen(buffer), 0) < 0) {
-        perror("send");
-        return -1;
-    }
-    return 0;
-}
+// // Função que retorna o ID do grupo de área com base no ID de localização
+// static inline int get_area_group_id(int loc_id) {
+//     if (loc_id >= 1 && loc_id <= 3) return 1; // Norte
+//     if (loc_id >= 4 && loc_id <= 5) return 2; // Sul
+//     if (loc_id >= 6 && loc_id <= 7) return 3; // Leste
+//     if (loc_id >= 8 && loc_id <= 10) return 4; // Oeste
+//     return 0; // Sem Area Definida or Desconhecida
+// }
 
-// Função que recebe uma mensagem
-static inline int receive_message(int sockfd, char *buffer, int buffer_size) {
-    memset(buffer, 0, buffer_size);
-    int total_bytes_received = 0;
-    char ch;
-    while (total_bytes_received < buffer_size - 1) {
-        int bytes_received = recv(sockfd, &ch, 1, 0);
-        if (bytes_received <= 0) {
-            if (bytes_received == 0) {
-                return 0;
-            }
-            perror("recv");
-            return -1; 
-        }
-        if (ch == '\n') {
-            break; 
-        }
-        buffer[total_bytes_received++] = ch;
-    }
-    buffer[total_bytes_received] = '\0'; 
-    if (total_bytes_received == buffer_size -1 && ch!= '\n') {
-        fprintf(stderr, "Warning: Received message might be truncated or missing newline.\n");
-    }
-    return total_bytes_received;
-}
+// // Função que envia uma mensagem
+// static inline int send_message(int sockfd, const char *message) {
+//     char buffer; // +1 for newline, +1 for null terminator
+//     strncpy(buffer, message, MAX_MSG_SIZE);
+//     buffer = '\0'; // Ensure null termination if message is too long
+//     strcat(buffer, "\n");
+//     if (send(sockfd, buffer, strlen(buffer), 0) < 0) {
+//         perror("send");
+//         return -1;
+//     }
+//     return 0;
+// }
 
-// Generate a unique 10-digit sensor ID (simple version for this context)
-static inline void generate_sensor_id(char* id_buffer) {
-    // For simplicity, using timestamp and a random number part
-    // This is not guaranteed to be unique in a distributed system without coordination
-    // but sufficient for this project's scope.
-    long ts_part = time(NULL) % 100000; // Last 5 digits of timestamp
-    int rand_part = rand() % 100000;    // Random 5 digits
-    sprintf(id_buffer, "%05ld%05d", ts_part, rand_part);
-    id_buffer = '\0';
-}
+// // Função que recebe uma mensagem
+// static inline int receive_message(int sockfd, char *buffer, int buffer_size) {
+//     memset(buffer, 0, buffer_size);
+//     int total_bytes_received = 0;
+//     char ch;
+//     while (total_bytes_received < buffer_size - 1) {
+//         int bytes_received = recv(sockfd, &ch, 1, 0);
+//         if (bytes_received <= 0) {
+//             if (bytes_received == 0) {
+//                 return 0;
+//             }
+//             perror("recv");
+//             return -1; 
+//         }
+//         if (ch == '\n') {
+//             break; 
+//         }
+//         buffer[total_bytes_received++] = ch;
+//     }
+//     buffer[total_bytes_received] = '\0'; 
+//     if (total_bytes_received == buffer_size -1 && ch!= '\n') {
+//         fprintf(stderr, "Warning: Received message might be truncated or missing newline.\n");
+//     }
+//     return total_bytes_received;
+// }
+
+// // Generate a unique 10-digit sensor ID (simple version for this context)
+// static inline void generate_sensor_id(char* id_buffer) {
+//     // For simplicity, using timestamp and a random number part
+//     // This is not guaranteed to be unique in a distributed system without coordination
+//     // but sufficient for this project's scope.
+//     long ts_part = time(NULL) % 100000; // Last 5 digits of timestamp
+//     int rand_part = rand() % 100000;    // Random 5 digits
+//     sprintf(id_buffer, "%05ld%05d", ts_part, rand_part);
+//     id_buffer = '\0';
+// }
 
 
 #endif // COMMON_H
