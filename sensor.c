@@ -9,7 +9,7 @@ int main(int argc, char **argv){
     // Lendo entradas do terminal
     server_port = atoi(argv[2]);
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket < 0)  error("ERROR opening socket");
+    if (server_socket < 0) error("ERROR opening socket");
 
     // Pegando dados do servidor e conectando
     server = gethostbyname(argv[1]);
@@ -21,31 +21,50 @@ int main(int argc, char **argv){
     if (connect(server_socket,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
         error("ERROR connecting");
 
-    // Fluxo de troca de mensagens entre sensor e servidor
-    while(1){
-        // Enviando mensagem para o servidor
-        printf("Escreva um comando: ");
-        bzero(buffer, 256);
-        fgets(buffer, 255, stdin);
-        n = write(server_socket, buffer, strlen(buffer));
-        // Caso seja kill, encerra conexão
-        if (strcmp(buffer, "kill\n") == 0){
-            printf("Conexão encerrada pelo sensor.\n");
-            close(server_socket);
-            break;
-        }
-        if (n < 0) error("ERROR writing to socket");
-        bzero(buffer, 256);
+    fd_set read_fds;
+    int max_fd = server_socket > STDIN_FILENO ? server_socket : STDIN_FILENO;
 
-        // Lendo mensagem recebida e exibindo, se for o caso
-        n = read(server_socket, buffer, 255);
-        if (n < 0) error("ERROR reading from socket");
-        if (strcmp(buffer, "kill\n") == 0){
-            printf("Conexão encerrada pelo servidor.\n");
-            close(server_socket);
+    // Loop de mensagens e comandos do sistema
+    while(1){
+        FD_ZERO(&read_fds);
+        FD_SET(server_socket, &read_fds);
+        FD_SET(STDIN_FILENO, &read_fds);
+
+        int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+        if (activity < 0) {
+            perror("Erro em select");
             break;
         }
-        printf("Recebido do servidor: %s\n",buffer);
+
+        // Verifica entrada do servidor
+        if (FD_ISSET(server_socket, &read_fds)) {
+            bzero(buffer, 256);
+            n = read(server_socket, buffer, 255);
+            if (n <= 0) {
+                printf("Servidor desconectado.\n");
+                break;
+            }
+            if (strcmp(buffer, "kill\n") == 0) {
+                printf("Conexão encerrada pelo servidor.\n");
+                break;
+            }
+            printf("Recebido do servidor: %s", buffer);
+        }
+
+        // Verifica entrada do terminal
+        if (FD_ISSET(STDIN_FILENO, &read_fds)) {
+            bzero(buffer, 256);
+            fgets(buffer, 255, stdin);
+            n = write(server_socket, buffer, strlen(buffer));
+            if (n < 0) error("ERROR writing to socket");
+
+            if (strcmp(buffer, "kill\n") == 0) {
+                printf("Conexão encerrada pelo sensor.\n");
+                break;
+            }
+        }
     }
+
+    close(server_socket);
     return 0;
 }

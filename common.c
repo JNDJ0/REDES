@@ -12,7 +12,7 @@
 #include <sys/select.h>
 
 #define MAX_PEERS 2
-#define MAX_SENSORS 15
+#define MAX_SENSORS 2
 #define MAX_MSG_SIZE 500 // Em bytes
 #define SENSOR_ID_LEN 10
 #define P2P_PORT_DEFAULT 64000
