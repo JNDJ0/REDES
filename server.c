@@ -1,15 +1,4 @@
-#include <time.h>
-#include <netdb.h> 
-#include <stdio.h>
-#include "common.h"
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <sys/types.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-
+#include "common.c"
 
 /*
 ./server 127.0.0.1 64000 60000
@@ -17,19 +6,12 @@
 ./sensor 127.0.0.1 60000
 ./sensor 127.0.0.1 61000
 */
-void error(const char *msg){
-    perror(msg);
-    exit(1);
-}
 
 char peer_id[10];
 char my_id[10];
 char* sensors_id[15];
-
-void GeneratePeerID(char *id_buffer) {
-    int random_part = rand() % 100000; 
-    sprintf(id_buffer, "P%05d", random_part);
-}
+int connected_peers;
+int connected_sensors;
 
 int P2PConnect(const char* ip, int port) {
     int peer_socket = -1;
@@ -40,6 +22,7 @@ int P2PConnect(const char* ip, int port) {
         error("P2P: ERROR opening connector socket");
     }
 
+    // Tentativa de conexão a um peer aberto
     bzero((char *)&peer_addr, sizeof(peer_addr));
     peer_addr.sin_family = AF_INET;
     if (inet_pton(AF_INET, ip, &peer_addr.sin_addr) <= 0) {
@@ -47,14 +30,26 @@ int P2PConnect(const char* ip, int port) {
         error("P2P: Invalid peer target IP address");
     }
     peer_addr.sin_port = htons(port);
-
+    // Caso o peer já esteja aberto, conectar
     if (connect(connector_socket, (struct sockaddr *)&peer_addr, sizeof(peer_addr)) == 0) {
-        GeneratePeerID(peer_id);
-        printf("Peer %s connected\n", peer_id);
-        peer_socket = connector_socket;
-        return peer_socket;
+        connected_peers++;
+        SendMessage(REQ_CONNPEER, "", connector_socket);
+        char* validation = ReceiveMessage(RES_CONNPEER, connector_socket);
+        if (validation != NULL) {
+            strncpy(my_id, validation, sizeof(my_id) - 1);
+            my_id[sizeof(my_id) - 1] = '\0';
+            printf("New Peer ID: %s\n", my_id);
+
+            GeneratePeerID(peer_id);
+            printf("Peer %s connected\n", peer_id);
+            peer_socket = connector_socket;
+            SendMessage(RES_CONNPEER, peer_id, peer_socket);
+            free(validation);
+            return peer_socket;
+        }
     } 
     else {
+        // Nenhum peer aberto; começar a ouvir por possíveis conexões
         close(connector_socket); 
 
         printf("No peers found, starting to listen...\n");
@@ -85,29 +80,35 @@ int P2PConnect(const char* ip, int port) {
         struct sockaddr_in connected_peer_addr;
         socklen_t peer_len = sizeof(connected_peer_addr);
         peer_socket = accept(listener_socket, (struct sockaddr *)&connected_peer_addr, &peer_len);
-
-        if (peer_socket < 0) {
-            close(listener_socket);
-            error("P2P: ERROR on accept");
-        }
         close(listener_socket);
         char connected_peer_ip_str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &connected_peer_addr.sin_addr, connected_peer_ip_str, INET_ADDRSTRLEN);
-        // Aqui você esperaria o REQ_CONNPEER do peer que se conectou
-        // Ex: receive_and_process_req_connpeer(peer_socket); // Recebe REQ, envia RES com ID, recebe RES com ID do peer
+        // Conexão bem sucedida: receber REQ e enviar RES
+        if (peer_socket >= 0) {
+            connected_peers++;
+            char* validation = ReceiveMessage(REQ_CONNPEER, peer_socket);
+            if (validation != NULL) {
+                GeneratePeerID(peer_id);
+                printf("Peer %s connected\n", peer_id);
+                SendMessage(RES_CONNPEER, peer_id, peer_socket);
+                // Recebendo ID dado pelo peer conectado
+                char* assigned_id = ReceiveMessage(RES_CONNPEER, peer_socket);
+                if (assigned_id != NULL) {
+                    strncpy(my_id, assigned_id, sizeof(my_id) - 1);
+                    my_id[sizeof(my_id) - 1] = '\0';
+                    printf("New Peer ID: %s\n", my_id);
+                }
+                free(validation);
+                free(assigned_id);
+                return peer_socket; 
+            }
+        }
+        else {
+            close(peer_socket);
+            error("P2P: ERROR on peer connection");
+        }
     }
 
-    if (peer_socket > 0) {
-        // printf("setei ID\n");
-        GeneratePeerID(peer_id);
-        printf("Peer %s connected\n", peer_id);
-        // A troca de IDs (PidS) deve seguir o protocolo do PDF após o socket TCP estar conectado.
-        return peer_socket; 
-    }
-    else {
-        close(peer_socket);
-        error("P2P: ERROR on peer connection");
-    }
     return -1;
 }
 
@@ -141,16 +142,6 @@ int SensorConnect(char *ip, int port){
     return sensor_socket;
 }
 
-void SendMessage(int type, char* payload, int socket_fd) {
-    message msg;
-    bzero(msg.payload, MAX_MSG_SIZE);
-    msg.type = type;
-    strncpy(msg.payload, payload, MAX_MSG_SIZE - 1);
-    msg.payload[MAX_MSG_SIZE - 1] = '\0'; 
-    int n = write(socket_fd, &msg, sizeof(msg));
-    if (n < 0) error("ERROR writing to socket");
-}
-
 int main(int argc, char **argv){
     // Definindo seed para IDs
     time_t current_time = time(NULL);
@@ -161,23 +152,17 @@ int main(int argc, char **argv){
     char* ip;
     char buffer[256];
     struct sockaddr_in peer_addr;
-    int peer_port, sensor_port, n, sensor_socket, peer_socket, peer_connections = 0, sensor_connections = 0;
+    int peer_port, sensor_port, n, sensor_socket, peer_socket;
+    connected_peers = 0;
+    connected_sensors = 0;
 
     // Lendo entradas do terminal
     ip = argv[1];
     peer_port = atoi(argv[2]);
     sensor_port = atoi(argv[3]);
 
-    // Conectando aos sockets do peer e recebendo ID
+    // Conectando aos sockets do peer e do sensor
     peer_socket = P2PConnect(ip, peer_port);
-    SendMessage(RES_CONNPEER, peer_id, peer_socket);
-    message response;
-    n = read(peer_socket, &response, sizeof(response));
-    if (n < 0) error("ERROR reading from peer socket");
-    strncpy(my_id, response.payload, sizeof(my_id) - 1);
-    printf("New Peer ID: %s\n", my_id);
-    
-    // Conectando ao socket do sensor
     sensor_socket = SensorConnect(ip, sensor_port);
     
     // // Fluxo de troca de mensagens entre servidor e sensor

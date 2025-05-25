@@ -4,10 +4,10 @@ CC = gcc
 # Flags de compilação
 # -Wall: Habilita a maioria dos warnings
 # -g: Adiciona informações de debugging
-CFLAGS = -Wall -g
+CFLAGS = -g
 
 # Arquivos de cabeçalho (se common.h for usado por ambos)
-HDRS = common.h
+HDRS = common.c
 
 # Alvos default: compila tudo
 all: server sensor
