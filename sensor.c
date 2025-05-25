@@ -1,5 +1,8 @@
 #include "common.c"
 
+char location_id;
+char my_id[10];
+
 int main(int argc, char **argv){
     char buffer[256];
     struct hostent *server;
@@ -21,6 +24,18 @@ int main(int argc, char **argv){
     if (connect(server_socket,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
         error("ERROR connecting");
 
+    location_id = (rand() % 5) + '0';
+    printf("%c\n", location_id);
+    SendMessage(REQ_CONNSEN, &location_id, server_socket);
+    char* validation = ReceiveMessage(RES_CONNSEN, server_socket);
+    printf("ID: %s\n", validation);
+    if (validation != NULL) {
+        strncpy(my_id, validation, sizeof(my_id) - 1);
+        my_id[sizeof(my_id) - 1] = '\0';
+        printf("SS New ID: %s\n", my_id);
+        printf("SL New ID: %s\n", my_id);
+        free(validation);
+    }
     fd_set read_fds;
     int max_fd = server_socket > STDIN_FILENO ? server_socket : STDIN_FILENO;
 

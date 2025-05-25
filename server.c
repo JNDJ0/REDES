@@ -7,12 +7,15 @@
 ./sensor 127.0.0.1 61000
 */
 
-char peer_id[10];
 char my_id[10];
-char* sensors_id[15];
+
+char peer_id[10];
 int connected_peers;
+
+char* sensors_id[15];
 int connected_sensors;
 int sensor_sockets[MAX_SENSORS]; 
+int sensors_locations[MAX_SENSORS];
 
 int P2PConnect(const char* ip, int port) {
     int peer_socket = -1;
@@ -31,16 +34,19 @@ int P2PConnect(const char* ip, int port) {
         error("P2P: Invalid peer target IP address");
     }
     peer_addr.sin_port = htons(port);
+
     // Caso o peer já esteja aberto, conectar
     if (connect(connector_socket, (struct sockaddr *)&peer_addr, sizeof(peer_addr)) == 0) {
         connected_peers++;
         SendMessage(REQ_CONNPEER, "", connector_socket);
         char* validation = ReceiveMessage(RES_CONNPEER, connector_socket);
         if (validation != NULL) {
+            // Recebendo ID dado pelo peer
             strncpy(my_id, validation, sizeof(my_id) - 1);
             my_id[sizeof(my_id) - 1] = '\0';
             printf("New Peer ID: %s\n", my_id);
 
+            // Dando ID ao peer conectado
             GeneratePeerID(peer_id);
             printf("Peer %s connected\n", peer_id);
             peer_socket = connector_socket;
@@ -52,46 +58,47 @@ int P2PConnect(const char* ip, int port) {
     else {
         // Nenhum peer aberto; começar a ouvir por possíveis conexões
         close(connector_socket); 
-
         printf("No peers found, starting to listen...\n");
+
+        // Instancia socket para ouvir conexões
         int listener_socket = socket(AF_INET, SOCK_STREAM, 0);
         if (listener_socket < 0) {
             error("P2P: ERROR opening listener socket");
             return -1;
         }
-
         int optval = 1;
         setsockopt(listener_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-
         struct sockaddr_in my_listen_addr;
         bzero((char *)&my_listen_addr, sizeof(my_listen_addr));
         my_listen_addr.sin_family = AF_INET;
         my_listen_addr.sin_addr.s_addr = INADDR_ANY; 
         my_listen_addr.sin_port = htons(port);
-
         if (bind(listener_socket, (struct sockaddr *)&my_listen_addr, sizeof(my_listen_addr)) < 0) {
             error("P2P: ERROR on binding listener socket"); 
         }
-
         if (listen(listener_socket, 1) < 0) { 
             close(listener_socket);
             error("P2P: ERROR on listen");
         }
 
+        // Aceitando a conexão feita
         struct sockaddr_in connected_peer_addr;
         socklen_t peer_len = sizeof(connected_peer_addr);
         peer_socket = accept(listener_socket, (struct sockaddr *)&connected_peer_addr, &peer_len);
         close(listener_socket);
         char connected_peer_ip_str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &connected_peer_addr.sin_addr, connected_peer_ip_str, INET_ADDRSTRLEN);
+        
         // Conexão bem sucedida: receber REQ e enviar RES
         if (peer_socket >= 0) {
             connected_peers++;
             char* validation = ReceiveMessage(REQ_CONNPEER, peer_socket);
             if (validation != NULL) {
+                // Gerando ID ao peer conectado
                 GeneratePeerID(peer_id);
                 printf("Peer %s connected\n", peer_id);
                 SendMessage(RES_CONNPEER, peer_id, peer_socket);
+
                 // Recebendo ID dado pelo peer conectado
                 char* assigned_id = ReceiveMessage(RES_CONNPEER, peer_socket);
                 if (assigned_id != NULL) {
@@ -115,7 +122,6 @@ int P2PConnect(const char* ip, int port) {
 
 int SensorConnectMulti(char *ip, int port) {
     struct sockaddr_in serv_addr;
-    printf("Servidor ouvindo sensores em %s:%d...\n", ip, port);
 
     int server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server_socket < 0) error("ERROR opening socket");
@@ -165,17 +171,19 @@ int main(int argc, char **argv){
     // Loop de mensagens e comandos do sistema
     while (1) {
         FD_ZERO(&read_fds);
-        FD_SET(sensor_listener_socket, &read_fds); // Aguardando novas conexões
-        FD_SET(peer_socket, &read_fds); // Aguardando novas conexões
-        FD_SET(STDIN_FILENO, &read_fds);           // Aguardando entrada do terminal
+        // Aguardando novas requisições dos sensores
+        FD_SET(sensor_listener_socket, &read_fds); 
+        // Aguardando novas requisições do peer
+        FD_SET(peer_socket, &read_fds);
+        // Aguardando entradas no terminal 
+        FD_SET(STDIN_FILENO, &read_fds);
 
-        // Adiciona os sensores conectados
+        // Trocando prioridade de leitura
+        if (peer_socket > max_fd) max_fd = peer_socket;
+        if (STDIN_FILENO > max_fd) max_fd = STDIN_FILENO;
         for (int i = 0; i < connected_sensors; i++) {
-            FD_SET(sensor_sockets[i], &read_fds);
-            if (sensor_sockets[i] > max_fd)
-                max_fd = sensor_sockets[i];
+            if (sensor_sockets[i] > max_fd) max_fd = sensor_sockets[i];
         }
-
         int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
         if (activity < 0) {
             perror("Erro em select");
@@ -196,7 +204,7 @@ int main(int argc, char **argv){
                 }
                 break;
             }
-            // Broadcast para sensores
+            // Default: Broadcast para sensores
             for (int i = 0; i < connected_sensors; i++) {
                 write(sensor_sockets[i], buffer, strlen(buffer));
             }
@@ -217,16 +225,29 @@ int main(int argc, char **argv){
             struct sockaddr_in cli_addr;
             socklen_t cli_len = sizeof(cli_addr);
             int new_socket = accept(sensor_listener_socket, (struct sockaddr *)&cli_addr, &cli_len);
-            if (new_socket < 0) {
-                perror("Erro ao aceitar sensor");
-                continue;
-            }
-            if (connected_sensors < MAX_SENSORS) {
-                sensor_sockets[connected_sensors++] = new_socket;
-                printf("Novo sensor conectado! Total: %d\n", connected_sensors);
-            } else {
-                printf("Máximo de sensores atingido. Conexão recusada.\n");
-                close(new_socket);
+            char* validation = ReceiveMessage(REQ_CONNSEN, new_socket);
+            printf("%s\n", validation);
+            if (validation != NULL){
+                if (new_socket < 0) {
+                    perror("Erro ao aceitar sensor");
+                    continue;
+                }
+                if (connected_sensors < MAX_SENSORS) {
+                    connected_sensors++;
+                    sensors_locations[connected_sensors] = atoi(validation);
+                    sensor_sockets[connected_sensors] = new_socket;
+
+                    sensors_id[connected_sensors] = malloc(10 * sizeof(char));
+                    GenerateSensorID(sensors_id[connected_sensors]);
+                    printf("Client %s added (Loc: %d)\n", sensors_id[connected_sensors], sensors_locations[connected_sensors]);
+                    SendMessage(RES_CONNSEN, sensors_id[connected_sensors], new_socket);
+                    free(validation);
+                    // printf("Novo sensor conectado! Total: %d\n", connected_sensors);
+                } 
+                else {
+                    SendMessage(ERROR_CODE, ERROR_SENSOR_LIMIT_EXCEEDED, new_socket);
+                    close(new_socket);
+                }
             }
         }
 

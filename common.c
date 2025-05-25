@@ -34,7 +34,7 @@
 #define RES_LOCLIST 41 // Resposta de lista de locais, com todos os IDs de sensores que tiverem o status na req
 #define REQ_AREALOG 42 // Requisição de sensores ativos em uma área, com o ID da área
 
-#define OK_CODE 0 // Código de susceso, onde o payload pode ser as mensagens de sucesso logo abaixo.
+#define OK_CODE 0 // Código de sucesso, onde o payload pode ser as mensagens de sucesso logo abaixo.
 #define OK_SUCCESSFUL_DISCONNECT "01"
 #define OK_SUCCESSFUL_CREATE "02"
 #define OK_SUCCESSFUL_UPDATE "03"
@@ -58,6 +58,11 @@ void error(const char *msg){
 void GeneratePeerID(char *id_buffer) {
     int random_part = rand() % 100000; 
     sprintf(id_buffer, "P%05d", random_part);
+}
+
+void GenerateSensorID(char *id_buffer) {
+    int random_part = rand() % 100000; 
+    sprintf(id_buffer, "S%05d", random_part);
 }
 
 void SendMessage(int type, char* payload, int socket_fd) {
