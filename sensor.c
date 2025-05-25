@@ -4,6 +4,12 @@ char location_id;
 char my_id[10];
 
 int main(int argc, char **argv){
+    // Definindo seed para localizações
+    time_t current_time = time(NULL);
+    pid_t current_pid = getpid();
+    unsigned int seed = current_time ^ current_pid;
+    srand(seed);
+
     char buffer[256];
     struct hostent *server;
     struct sockaddr_in serv_addr;
@@ -24,17 +30,16 @@ int main(int argc, char **argv){
     if (connect(server_socket,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
         error("ERROR connecting");
 
+    // Gerando ID de localização aleatório
     location_id = (rand() % 5) + '0';
-    printf("%c\n", location_id);
     SendMessage(REQ_CONNSEN, &location_id, server_socket);
-    char* validation = ReceiveMessage(RES_CONNSEN, server_socket);
-    printf("ID: %s\n", validation);
-    if (validation != NULL) {
-        strncpy(my_id, validation, sizeof(my_id) - 1);
+    // Conectando ao servidor e recebendo ID
+    message msg = ReceiveRawMessage(server_socket);
+    if (msg.type == RES_CONNSEN) {
+        strncpy(my_id, msg.payload, sizeof(my_id) - 1);
         my_id[sizeof(my_id) - 1] = '\0';
         printf("SS New ID: %s\n", my_id);
         printf("SL New ID: %s\n", my_id);
-        free(validation);
     }
     fd_set read_fds;
     int max_fd = server_socket > STDIN_FILENO ? server_socket : STDIN_FILENO;
@@ -59,10 +64,6 @@ int main(int argc, char **argv){
                 printf("Servidor desconectado.\n");
                 break;
             }
-            if (strcmp(buffer, "kill\n") == 0) {
-                printf("Conexão encerrada pelo servidor.\n");
-                break;
-            }
             printf("Recebido do servidor: %s", buffer);
         }
 
@@ -74,7 +75,14 @@ int main(int argc, char **argv){
             if (n < 0) error("ERROR writing to socket");
 
             if (strcmp(buffer, "kill\n") == 0) {
-                printf("Conexão encerrada pelo sensor.\n");
+                SendMessage(REQ_DISCSEN, my_id, server_socket);
+                // char* validation = ReceiveMessage(OK_CODE, server_socket);
+                message msg = ReceiveRawMessage(server_socket);
+                if (msg.type == OK_CODE){
+                    printf("SS Successful disconnect\n");
+                    printf("SL Successful disconnect\n");
+                    close(server_socket);
+                }
                 break;
             }
         }

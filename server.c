@@ -14,7 +14,8 @@ int connected_peers;
 
 char* sensors_id[15];
 int connected_sensors;
-int sensor_sockets[MAX_SENSORS]; 
+int sensors_sockets[MAX_SENSORS]; 
+int sensors_status[MAX_SENSORS];
 int sensors_locations[MAX_SENSORS];
 
 int P2PConnect(const char* ip, int port) {
@@ -39,10 +40,10 @@ int P2PConnect(const char* ip, int port) {
     if (connect(connector_socket, (struct sockaddr *)&peer_addr, sizeof(peer_addr)) == 0) {
         connected_peers++;
         SendMessage(REQ_CONNPEER, "", connector_socket);
-        char* validation = ReceiveMessage(RES_CONNPEER, connector_socket);
-        if (validation != NULL) {
+        message msg = ReceiveRawMessage(connector_socket);
+        if (msg.type == RES_CONNPEER) {
             // Recebendo ID dado pelo peer
-            strncpy(my_id, validation, sizeof(my_id) - 1);
+            strncpy(my_id, msg.payload, sizeof(my_id) - 1);
             my_id[sizeof(my_id) - 1] = '\0';
             printf("New Peer ID: %s\n", my_id);
 
@@ -51,7 +52,6 @@ int P2PConnect(const char* ip, int port) {
             printf("Peer %s connected\n", peer_id);
             peer_socket = connector_socket;
             SendMessage(RES_CONNPEER, peer_id, peer_socket);
-            free(validation);
             return peer_socket;
         }
     } 
@@ -92,22 +92,22 @@ int P2PConnect(const char* ip, int port) {
         // Conexão bem sucedida: receber REQ e enviar RES
         if (peer_socket >= 0) {
             connected_peers++;
-            char* validation = ReceiveMessage(REQ_CONNPEER, peer_socket);
-            if (validation != NULL) {
+            message msg = ReceiveRawMessage(peer_socket);
+            if (msg.type == REQ_CONNPEER) {
                 // Gerando ID ao peer conectado
                 GeneratePeerID(peer_id);
                 printf("Peer %s connected\n", peer_id);
                 SendMessage(RES_CONNPEER, peer_id, peer_socket);
 
                 // Recebendo ID dado pelo peer conectado
-                char* assigned_id = ReceiveMessage(RES_CONNPEER, peer_socket);
-                if (assigned_id != NULL) {
+                // char* assigned_id = ReceiveMessage(RES_CONNPEER, peer_socket);
+                msg = ReceiveRawMessage(peer_socket);
+                if (msg.type == RES_CONNPEER) {
+                    char* assigned_id = msg.payload;
                     strncpy(my_id, assigned_id, sizeof(my_id) - 1);
                     my_id[sizeof(my_id) - 1] = '\0';
                     printf("New Peer ID: %s\n", my_id);
                 }
-                free(validation);
-                free(assigned_id);
                 return peer_socket; 
             }
         }
@@ -182,7 +182,7 @@ int main(int argc, char **argv){
         if (peer_socket > max_fd) max_fd = peer_socket;
         if (STDIN_FILENO > max_fd) max_fd = STDIN_FILENO;
         for (int i = 0; i < connected_sensors; i++) {
-            if (sensor_sockets[i] > max_fd) max_fd = sensor_sockets[i];
+            if (sensors_sockets[i] > max_fd) max_fd = sensors_sockets[i];
         }
         int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
         if (activity < 0) {
@@ -197,8 +197,8 @@ int main(int argc, char **argv){
             // kill: encerra comunicações com o outro peer.
             if (strncmp(buffer, "kill", 4) == 0) {
                 SendMessage(REQ_DISCPEER, my_id, peer_socket);
-                char* validation = ReceiveMessage(OK_CODE, peer_socket);
-                if (validation != NULL){
+                message msg = ReceiveRawMessage(peer_socket);
+                if (msg.type == OK_CODE){
                     printf("Peer %s disconnected.\n", peer_id);
                     close(peer_socket);
                 }
@@ -206,18 +206,37 @@ int main(int argc, char **argv){
             }
             // Default: Broadcast para sensores
             for (int i = 0; i < connected_sensors; i++) {
-                write(sensor_sockets[i], buffer, strlen(buffer));
+                write(sensors_sockets[i], buffer, strlen(buffer));
             }
         }
 
         // Verifica novas requisições dos peers
         if (FD_ISSET(peer_socket, &read_fds)) {
-            char* validation = ReceiveMessage(REQ_DISCPEER, peer_socket);
-            if (validation != NULL) { 
-                printf("Peer %s disconnected.\n", peer_id);
-                SendMessage(OK_CODE, OK_SUCCESSFUL_DISCONNECT, peer_socket);
-                peer_socket = P2PConnect(ip, peer_port);
-            }
+            message msg = ReceiveRawMessage(peer_socket);
+            
+            switch (msg.type) {
+                case REQ_DISCPEER:
+                    printf("Peer %s disconnected.\n", peer_id);
+                    SendMessage(OK_CODE, OK_SUCCESSFUL_DISCONNECT, peer_socket);
+                    peer_socket = P2PConnect(ip, peer_port);
+                    break;
+            
+                case REQ_CONNSEN:
+                    if (connected_sensors < MAX_SENSORS) {
+                        sensors_id[connected_sensors] = strdup(msg.payload);
+                        sensors_status[connected_sensors] = 0;
+                        printf("Client %s added (Status: %d)\n", sensors_id[connected_sensors], sensors_status[connected_sensors]);
+                        connected_sensors++;
+                    } else {
+                        SendMessage(ERROR_CODE, ERROR_SENSOR_LIMIT_EXCEEDED, peer_socket);
+                        close(peer_socket);
+                    }
+                    break;
+            
+                default:
+                    fprintf(stderr, "1. Mensagem desconhecida recebida: tipo %d\n", msg.type);
+                    break;
+            }            
         }
 
         // Verifica novas conexões de sensores
@@ -225,56 +244,77 @@ int main(int argc, char **argv){
             struct sockaddr_in cli_addr;
             socklen_t cli_len = sizeof(cli_addr);
             int new_socket = accept(sensor_listener_socket, (struct sockaddr *)&cli_addr, &cli_len);
-            char* validation = ReceiveMessage(REQ_CONNSEN, new_socket);
-            printf("%s\n", validation);
-            if (validation != NULL){
-                if (new_socket < 0) {
-                    perror("Erro ao aceitar sensor");
-                    continue;
-                }
-                if (connected_sensors < MAX_SENSORS) {
-                    connected_sensors++;
-                    sensors_locations[connected_sensors] = atoi(validation);
-                    sensor_sockets[connected_sensors] = new_socket;
+            message msg = ReceiveRawMessage(new_socket);
+            
+            switch(msg.type){
+                case REQ_CONNSEN:
+                    if (connected_sensors < MAX_SENSORS) {
+                        sensors_locations[connected_sensors] = atoi(msg.payload);
+                        sensors_sockets[connected_sensors] = new_socket;
+    
+                        sensors_id[connected_sensors] = malloc(10 * sizeof(char));
+                        GenerateSensorID(sensors_id[connected_sensors]);
+                        printf("Client %s added (Loc: %d)\n", sensors_id[connected_sensors], sensors_locations[connected_sensors]);
+                        SendMessage(RES_CONNSEN, sensors_id[connected_sensors], new_socket);
+                        SendMessage(REQ_CONNSEN, sensors_id[connected_sensors], peer_socket);
+                        connected_sensors++;
+                    } 
+                    else {
+                        SendMessage(ERROR_CODE, ERROR_SENSOR_LIMIT_EXCEEDED, new_socket);
+                        close(new_socket);
+                    }
+                    break;
 
-                    sensors_id[connected_sensors] = malloc(10 * sizeof(char));
-                    GenerateSensorID(sensors_id[connected_sensors]);
-                    printf("Client %s added (Loc: %d)\n", sensors_id[connected_sensors], sensors_locations[connected_sensors]);
-                    SendMessage(RES_CONNSEN, sensors_id[connected_sensors], new_socket);
-                    free(validation);
-                    // printf("Novo sensor conectado! Total: %d\n", connected_sensors);
-                } 
-                else {
-                    SendMessage(ERROR_CODE, ERROR_SENSOR_LIMIT_EXCEEDED, new_socket);
-                    close(new_socket);
-                }
+                default:
+                    fprintf(stderr, "2. Mensagem desconhecida recebida: tipo %d\n", msg.type);
+                    break;
             }
         }
 
         // Verifica mensagens dos sensores
         for (int i = 0; i < connected_sensors; i++) {
-            if (FD_ISSET(sensor_sockets[i], &read_fds)) {
-                bzero(buffer, 256);
-                int n = read(sensor_sockets[i], buffer, 255);
-                if (n <= 0) {
-                    printf("Sensor %d desconectado.\n", i + 1);
-                    close(sensor_sockets[i]);
-                    // Remove sensor
-                    for (int j = i; j < connected_sensors - 1; j++) {
-                        sensor_sockets[j] = sensor_sockets[j + 1];
-                    }
-                    connected_sensors--;
-                    i--; // Fica no mesmo índice
-                    continue;
+            if (FD_ISSET(sensors_sockets[i], &read_fds)) {
+                printf("encontrei...\n");
+                message msg = ReceiveRawMessage(sensors_sockets[i]);
+                switch(msg.type){
+                    // Caso o sensor se desconecte, remove-o da lista de sensores conectados
+                    case REQ_DISCSEN:
+                        int error = 0;
+                        for (int i = 0; i < connected_sensors; i++) {
+                            if (strcmp(sensors_id[i], msg.payload) == 0) {
+                                printf("Client %s removed (Loc %d).\n", sensors_id[i], sensors_locations[i]);
+                                SendMessage(OK_CODE, OK_SUCCESSFUL_DISCONNECT, sensors_sockets[i]);
+                                close(sensors_sockets[i]);
+                                free(sensors_id[i]);
+                                // Remove sensor
+                                for (int j = i; j < connected_sensors - 1; j++) {
+                                    sensors_sockets[j] = sensors_sockets[j + 1];
+                                    sensors_id[j] = sensors_id[j + 1];
+                                    sensors_locations[j] = sensors_locations[j + 1];
+                                }
+                                connected_sensors--;
+                                break;
+                            }
+                            else error++;
+                        }
+                        if (error == connected_sensors) {
+                            printf("ta perdido pai?\n");
+                            // SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, new_socket);
+                            // close(new_socket);
+                        }
+                        break;
+
+                    default:
+                        fprintf(stderr, "3. Mensagem desconhecida recebida: tipo %d\n", msg.type);
+                        break;
                 }
-                printf("Sensor %d: %s", i + 1, buffer);
             }
         }
     }
 
     // Encerra conexões
     for (int i = 0; i < connected_sensors; i++) {
-        close(sensor_sockets[i]);
+        close(sensors_sockets[i]);
     }
     close(sensor_listener_socket);
     close(peer_socket);

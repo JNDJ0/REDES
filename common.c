@@ -75,23 +75,33 @@ void SendMessage(int type, char* payload, int socket_fd) {
     if (n < 0) error("ERROR writing to socket");
 }
 
-char* ReceiveMessage(int expected_type, int socket_fd) {
+message ReceiveRawMessage(int socket_fd) {
     message msg;
-    char* return_payload = NULL; 
-
     ssize_t n = read(socket_fd, &msg, sizeof(msg));
-    // Validando tipo da mensagem recebida com o esperado
-    if (msg.type != expected_type) {
-        fprintf(stderr, "ReceiveMessage: Incorrect message type. Expected %d, got %d.\n", expected_type, msg.type);
-        return NULL;
-    }
-    return_payload = (char*)malloc(sizeof(msg.payload) + 1);
-    if (return_payload == NULL) {
-        perror("ReceiveMessage: ERROR allocating memory for payload");
-        return NULL;
-    }
-    // Copiando o payload da mensagem recebida para o buffer de retorno
-    strncpy(return_payload, msg.payload, sizeof(msg.payload) - 1);
-    return_payload[sizeof(msg.payload) - 1] = '\0';
-    return return_payload;
+    return msg;
 }
+
+// char* ReceiveMessage(int expected_type, int socket_fd) {
+//     message msg;
+//     char* return_payload = NULL; 
+
+//     ssize_t n = read(socket_fd, &msg, sizeof(msg));
+//     if (n < 0) {
+//         perror("ReceiveMessage: ERROR reading from socket");
+//         return NULL;
+//     }
+//     return_payload = (char*)malloc(sizeof(msg.payload) + 1);
+//     if (return_payload == NULL) {
+//         perror("ReceiveMessage: ERROR allocating memory for payload");
+//         return NULL;
+//     }
+//     // Copiando o payload da mensagem recebida para o buffer de retorno
+//     strncpy(return_payload, msg.payload, sizeof(msg.payload) - 1);
+//     return_payload[sizeof(msg.payload) - 1] = '\0';
+//     // Validando tipo da mensagem recebida com o esperado
+//     if (msg.type != expected_type) {
+//         fprintf(stderr, "ReceiveMessage: Incorrect message type. Expected %d, got %d.\n", expected_type, msg.type);
+//         return NULL;
+//     }
+//     return return_payload;
+// }
