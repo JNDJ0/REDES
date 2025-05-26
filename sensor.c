@@ -68,13 +68,11 @@ int main(int argc, char **argv){
         }
 
         // Verifica entrada do terminal
-        if (FD_ISSET(STDIN_FILENO, &read_fds)) {
+        if (FD_ISSET(STDIN_FILENO, &read_fds))  {
             bzero(buffer, 256);
             fgets(buffer, 255, stdin);
-            n = write(server_socket, buffer, strlen(buffer));
-            if (n < 0) error("ERROR writing to socket");
-
-            if (strcmp(buffer, "kill\n") == 0) {
+            // kill: encerra comunicações com o outro peer.
+            if (strncmp(buffer, "kill", 4) == 0) {
                 SendMessage(REQ_DISCSEN, my_id, server_socket);
                 // char* validation = ReceiveMessage(OK_CODE, server_socket);
                 message msg = ReceiveRawMessage(server_socket);

@@ -9,6 +9,8 @@
 
 char my_id[10];
 
+// 1 -> localização / 0 -> status
+int role;
 char peer_id[10];
 int connected_peers;
 
@@ -100,7 +102,6 @@ int P2PConnect(const char* ip, int port) {
                 SendMessage(RES_CONNPEER, peer_id, peer_socket);
 
                 // Recebendo ID dado pelo peer conectado
-                // char* assigned_id = ReceiveMessage(RES_CONNPEER, peer_socket);
                 msg = ReceiveRawMessage(peer_socket);
                 if (msg.type == RES_CONNPEER) {
                     char* assigned_id = msg.payload;
@@ -157,27 +158,31 @@ int main(int argc, char **argv){
     connected_peers = 0;
     connected_sensors = 0;
     
-    // Lendo entradas do terminal
+    // Lendo entradas do terminal e atribuindo papel
     ip = argv[1];
     peer_port = atoi(argv[2]);
     sensor_port = atoi(argv[3]);
-    
+    role = sensor_port == SL_CLIENT_LISTEN_PORT_DEFAULT ? 1 : 0;
+
     // Conectando aos sockets do peer e do sensor
     peer_socket = P2PConnect(ip, peer_port);
     sensor_listener_socket = SensorConnectMulti(ip, sensor_port);
-    max_fd = sensor_listener_socket;
     fd_set read_fds;
-
+    
     // Loop de mensagens e comandos do sistema
     while (1) {
         FD_ZERO(&read_fds);
+        max_fd = sensor_listener_socket;
         // Aguardando novas requisições dos sensores
         FD_SET(sensor_listener_socket, &read_fds); 
         // Aguardando novas requisições do peer
         FD_SET(peer_socket, &read_fds);
         // Aguardando entradas no terminal 
         FD_SET(STDIN_FILENO, &read_fds);
-
+        for (int i = 0; i < connected_sensors; i++) {
+            FD_SET(sensors_sockets[i], &read_fds);
+        }
+        
         // Trocando prioridade de leitura
         if (peer_socket > max_fd) max_fd = peer_socket;
         if (STDIN_FILENO > max_fd) max_fd = STDIN_FILENO;
@@ -274,7 +279,6 @@ int main(int argc, char **argv){
         // Verifica mensagens dos sensores
         for (int i = 0; i < connected_sensors; i++) {
             if (FD_ISSET(sensors_sockets[i], &read_fds)) {
-                printf("encontrei...\n");
                 message msg = ReceiveRawMessage(sensors_sockets[i]);
                 switch(msg.type){
                     // Caso o sensor se desconecte, remove-o da lista de sensores conectados
@@ -297,11 +301,11 @@ int main(int argc, char **argv){
                             }
                             else error++;
                         }
-                        if (error == connected_sensors) {
-                            printf("ta perdido pai?\n");
-                            // SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, new_socket);
-                            // close(new_socket);
-                        }
+                        // if (error == connected_sensors) {
+                        //     printf("ta perdido pai?\n");
+                        //     // SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, new_socket);
+                        //     // close(new_socket);
+                        // }
                         break;
 
                     default:
