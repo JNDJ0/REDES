@@ -50,11 +50,21 @@ typedef struct {
     char payload[MAX_MSG_SIZE];
 } message;
 
+/**
+ * @brief Exibe uma mensagem de erro e encerra o programa.
+ * 
+ * @param msg A mensagem de erro a ser exibida.
+ */
 void error(const char *msg){
     perror(msg);
     exit(1);
 }
 
+/**
+ * @brief Gera um ID único para um peer.
+ * 
+ * @param id_buffer O buffer onde o ID gerado será armazenado.
+ */
 void GeneratePeerID(char *id_buffer) {
     int random_part = rand() % 100000; 
     sprintf(id_buffer, "P%05d", random_part);
