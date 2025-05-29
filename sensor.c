@@ -31,13 +31,13 @@ int main(int argc, char **argv){
         error("ERROR connecting");
 
     // Gerando ID de localização aleatório
-    location_id = (rand() % 5) + '0';
+    location_id = ((rand() % 10) + 1) + '0';
     SendMessage(REQ_CONNSEN, &location_id, server_socket);
     // Conectando ao servidor e recebendo ID
     message msg = ReceiveRawMessage(server_socket);
     if (msg.type == RES_CONNSEN) {
-        strncpy(my_id, msg.payload, sizeof(my_id) - 1);
-        my_id[sizeof(my_id) - 1] = '\0';
+        strncpy(my_id, msg.payload, MAX_MSG_SIZE);
+        my_id[MAX_MSG_SIZE] = '\0';
         printf("SS New ID: %s\n", my_id);
         printf("SL New ID: %s\n", my_id);
     }

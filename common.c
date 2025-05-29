@@ -47,7 +47,7 @@
 
 typedef struct {
     int type;
-    char payload[MAX_MSG_SIZE];
+    char payload[MAX_MSG_SIZE]; // loc @ id
 } message;
 
 /**
@@ -61,20 +61,25 @@ void error(const char *msg){
 }
 
 /**
- * @brief Gera um ID único para um peer.
+ * @brief Gera um ID único. 
  * 
  * @param id_buffer O buffer onde o ID gerado será armazenado.
  */
-void GeneratePeerID(char *id_buffer) {
-    int random_part = rand() % 100000; 
-    sprintf(id_buffer, "P%05d", random_part);
+void GenerateRandomID(char *id_buffer) {
+    for (int i = 0; i < 10; i++) {
+        id_buffer[i] = '0' + rand() % 10;
+    }
+    id_buffer[10] = '\0';
 }
 
-void GenerateSensorID(char *id_buffer) {
-    int random_part = rand() % 100000; 
-    sprintf(id_buffer, "S%05d", random_part);
-}
 
+/**
+ * @brief Envia uma mensagem para um socket.
+ * 
+ * @param type O tipo da mensagem a ser enviada.
+ * @param payload O payload da mensagem a ser enviada.
+ * @param socket_fd O descritor do socket para onde a mensagem será enviada.
+ */
 void SendMessage(int type, char* payload, int socket_fd) {
     message msg;
     bzero(msg.payload, MAX_MSG_SIZE);
@@ -85,33 +90,14 @@ void SendMessage(int type, char* payload, int socket_fd) {
     if (n < 0) error("ERROR writing to socket");
 }
 
+/**
+ * @brief Recebe uma mensagem de um socket.
+ * 
+ * @param socket_fd O descritor do socket de onde a mensagem será recebida.
+ * @return A mensagem recebida.
+ */
 message ReceiveRawMessage(int socket_fd) {
     message msg;
     ssize_t n = read(socket_fd, &msg, sizeof(msg));
     return msg;
 }
-
-// char* ReceiveMessage(int expected_type, int socket_fd) {
-//     message msg;
-//     char* return_payload = NULL; 
-
-//     ssize_t n = read(socket_fd, &msg, sizeof(msg));
-//     if (n < 0) {
-//         perror("ReceiveMessage: ERROR reading from socket");
-//         return NULL;
-//     }
-//     return_payload = (char*)malloc(sizeof(msg.payload) + 1);
-//     if (return_payload == NULL) {
-//         perror("ReceiveMessage: ERROR allocating memory for payload");
-//         return NULL;
-//     }
-//     // Copiando o payload da mensagem recebida para o buffer de retorno
-//     strncpy(return_payload, msg.payload, sizeof(msg.payload) - 1);
-//     return_payload[sizeof(msg.payload) - 1] = '\0';
-//     // Validando tipo da mensagem recebida com o esperado
-//     if (msg.type != expected_type) {
-//         fprintf(stderr, "ReceiveMessage: Incorrect message type. Expected %d, got %d.\n", expected_type, msg.type);
-//         return NULL;
-//     }
-//     return return_payload;
-// }

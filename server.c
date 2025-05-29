@@ -13,7 +13,7 @@ int role; // 1 -> localização / 0 -> status
 char peer_id[10];
 int connected_peers;
 
-char* sensors_id[15];
+char sensors_id[MAX_SENSORS][10];
 int connected_sensors;
 int sensors_sockets[MAX_SENSORS]; 
 int sensors_status[MAX_SENSORS];
@@ -51,12 +51,12 @@ int P2PConnect(const char* ip, int port) {
         message msg = ReceiveRawMessage(connector_socket);
         if (msg.type == RES_CONNPEER) {
             // Recebendo ID dado pelo peer
-            strncpy(my_id, msg.payload, sizeof(my_id) - 1);
-            my_id[sizeof(my_id) - 1] = '\0';
+            strncpy(my_id, msg.payload, MAX_MSG_SIZE);
+            my_id[MAX_MSG_SIZE] = '\0';
             printf("New Peer ID: %s\n", my_id);
 
             // Dando ID ao peer conectado
-            GeneratePeerID(peer_id);
+            GenerateRandomID(peer_id);
             printf("Peer %s connected\n", peer_id);
             peer_socket = connector_socket;
             SendMessage(RES_CONNPEER, peer_id, peer_socket);
@@ -103,7 +103,7 @@ int P2PConnect(const char* ip, int port) {
             message msg = ReceiveRawMessage(peer_socket);
             if (msg.type == REQ_CONNPEER) {
                 // Gerando ID ao peer conectado
-                GeneratePeerID(peer_id);
+                GenerateRandomID(peer_id);
                 printf("Peer %s connected\n", peer_id);
                 SendMessage(RES_CONNPEER, peer_id, peer_socket);
 
@@ -111,8 +111,8 @@ int P2PConnect(const char* ip, int port) {
                 msg = ReceiveRawMessage(peer_socket);
                 if (msg.type == RES_CONNPEER) {
                     char* assigned_id = msg.payload;
-                    strncpy(my_id, assigned_id, sizeof(my_id) - 1);
-                    my_id[sizeof(my_id) - 1] = '\0';
+                    strncpy(my_id, assigned_id, MAX_MSG_SIZE);
+                    my_id[MAX_MSG_SIZE] = '\0';
                     printf("New Peer ID: %s\n", my_id);
                 }
                 return peer_socket; 
@@ -243,8 +243,11 @@ int main(int argc, char **argv){
                 // Recebendo requisição de conexão do sensor enviado pelo outro peer
                 case REQ_CONNSEN:
                     if (connected_sensors < MAX_SENSORS) {
-                        sensors_id[connected_sensors] = strdup(msg.payload);
-                        sensors_status[connected_sensors] = 0;
+                        char* assigned_id = msg.payload;
+                        strncpy(sensors_id[connected_sensors], assigned_id, MAX_MSG_SIZE);
+                        sensors_id[connected_sensors][MAX_MSG_SIZE] = '\0';
+                        sensors_status[connected_sensors] = rand() % 2;
+                        printf("sou da role %d\n", role);
                         printf("Client %s added (Status: %d)\n", sensors_id[connected_sensors], sensors_status[connected_sensors]);
                         connected_sensors++;
                     } 
@@ -254,14 +257,15 @@ int main(int argc, char **argv){
                     }
                     break;
                 
+                // Recebendo requisição de desconexão do sensor enviado pelo outro peer
                 case REQ_DISCSEN:
                     // Caso o sensor esteja na lista, o remove
                     for (int i = 0; i < connected_sensors; i++) {
                         if (strcmp(sensors_id[i], msg.payload) == 0) {
                             printf("Client %s removed (Status: %d)\n", sensors_id[i], sensors_status[i]);
-                            free(sensors_id[i]);
                             for (int j = i; j < connected_sensors - 1; j++) {
-                                sensors_id[j] = sensors_id[j + 1];
+                                strncpy(sensors_id[j], sensors_id[j + 1], MAX_MSG_SIZE);
+                                // sensors_id[j] = sensors_id[j + 1];
                                 sensors_status[j] = sensors_status[j + 1];
                             }
                             connected_sensors--;
@@ -291,8 +295,8 @@ int main(int argc, char **argv){
                         sensors_locations[connected_sensors] = atoi(msg.payload);
                         sensors_sockets[connected_sensors] = new_socket;
     
-                        sensors_id[connected_sensors] = malloc(10 * sizeof(char));
-                        GenerateSensorID(sensors_id[connected_sensors]);
+                        GenerateRandomID(sensors_id[connected_sensors]);
+                        printf("sou da role %d\n", role);
                         printf("Client %s added (Loc: %d)\n", sensors_id[connected_sensors], sensors_locations[connected_sensors]);
                         SendMessage(RES_CONNSEN, sensors_id[connected_sensors], new_socket);
                         SendMessage(REQ_CONNSEN, sensors_id[connected_sensors], peer_socket);
@@ -322,14 +326,14 @@ int main(int argc, char **argv){
                         for (int i = 0; i < connected_sensors; i++) {
                             // Caso o sensor esteja na lista, o remove
                             if (strcmp(sensors_id[i], msg.payload) == 0) {
-                                printf("Client %s removed (Loc %d)\n", sensors_id[i], sensors_locations[i]);
+                                printf("Client %s removed (Loc: %d)\n", sensors_id[i], sensors_locations[i]);
                                 SendMessage(OK_CODE, OK_SUCCESSFUL_DISCONNECT, sensors_sockets[i]);
                                 SendMessage(REQ_DISCSEN, sensors_id[i], peer_socket);
                                 close(sensors_sockets[i]);
-                                free(sensors_id[i]);
                                 for (int j = i; j < connected_sensors - 1; j++) {
                                     sensors_sockets[j] = sensors_sockets[j + 1];
-                                    sensors_id[j] = sensors_id[j + 1];
+                                    strncpy(sensors_id[j], sensors_id[j + 1], MAX_MSG_SIZE);
+                                    // sensors_id[j] = sensors_id[j + 1];
                                     sensors_locations[j] = sensors_locations[j + 1];
                                 }
                                 connected_sensors--;
