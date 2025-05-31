@@ -1,22 +1,64 @@
 #include "common.c"
 
 char location_id;
-char ss_id[10];
-char sl_id[10];
+char sl_id[MAX_MSG_SIZE + 1];
+char ss_id[MAX_MSG_SIZE + 1];
 
-int main(int argc, char **argv){
+/**
+ * @brief Conecta ao servidor em um endereço IP e porta especificados.
+ * 
+ * @param ip O endereço IP do servidor.
+ * @param port A porta do servidor.
+ * 
+ * @return O socket do servidor conectado ou -1 em caso de erro.
+ */
+int ServerConnect(char *ip, int port) {
+    struct sockaddr_in serv_addr;
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) error("ERROR opening socket");
+
+    bzero((char *)&serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = inet_addr(ip);
+    serv_addr.sin_port = htons(port);
+
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        error("ERROR connecting");
+    }
+
+    SendMessage(REQ_CONNSEN, &location_id, sock);
+    message msg = ReceiveRawMessage(sock);
+    if (msg.type == RES_CONNSEN){
+        if (port == SL_CLIENT_LISTEN_PORT_DEFAULT) {
+            strncpy(sl_id, msg.payload, MAX_MSG_SIZE);
+            sl_id[MAX_MSG_SIZE] = '\0';
+            printf("SL New ID: %s\n", sl_id);
+        }
+        else if (port == SS_CLIENT_LISTEN_PORT_DEFAULT) {
+            strncpy(ss_id, msg.payload, MAX_MSG_SIZE);
+            ss_id[MAX_MSG_SIZE] = '\0';
+            printf("SS New ID: %s\n", ss_id);
+        }
+    }
+
+    return sock;
+}
+
+int main(int argc, char **argv) {
     // Definindo seed para localizações
     time_t current_time = time(NULL);
     pid_t current_pid = getpid();
     unsigned int seed = current_time ^ current_pid;
     srand(seed);
 
-    char buffer[256];
+    char* ip;
+    char buffer[256];;
     struct hostent *server;
     struct sockaddr_in serv_addr;
     int sl_socket, ss_socket, sl_port, ss_port, n;
 
     // Lendo entradas do terminal
+    ip = argv[1];
     sl_port = atoi(argv[2]);
     ss_port = atoi(argv[3]);
     if (sl_port != SL_CLIENT_LISTEN_PORT_DEFAULT && ss_port != SS_CLIENT_LISTEN_PORT_DEFAULT) {
@@ -24,51 +66,15 @@ int main(int argc, char **argv){
         ss_port = SS_CLIENT_LISTEN_PORT_DEFAULT;
     }
 
-    sl_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (sl_socket < 0) error("ERROR opening socket");
-
-    ss_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (ss_socket < 0) error("ERROR opening socket");
-
-    // Pegando dados dos servidores e conectando
-    server = gethostbyname(argv[1]);
-    if (server == NULL) error("ERROR, no such host\n");
-
-    bzero((char *) &serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
-    serv_addr.sin_port = htons(sl_port);
-    if (connect(sl_socket,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
-        error("ERROR connecting");
-    bzero((char *) &serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
-    serv_addr.sin_port = htons(ss_port);
-    if (connect(ss_socket,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0) 
-        error("ERROR connecting");
-
-    // Gerando ID de localização aleatório
+    // Gerando ID de localização aleatório, conectando aos servidores e recebendo ID
     location_id = (rand() % 10) + '0';
-    SendMessage(REQ_CONNSEN, &location_id, ss_socket);
-    SendMessage(REQ_CONNSEN, &location_id, sl_socket);
-    // Conectando aos servidores e recebendo ID
-    message msg = ReceiveRawMessage(ss_socket);
-    if (msg.type == RES_CONNSEN){
-        strncpy(ss_id, msg.payload, MAX_MSG_SIZE);
-        ss_id[MAX_MSG_SIZE] = '\0';
-        printf("SS New ID: %s\n", ss_id);
-    }
-    msg = ReceiveRawMessage(sl_socket);
-    if (msg.type == RES_CONNSEN){
-        strncpy(sl_id, msg.payload, MAX_MSG_SIZE);
-        sl_id[MAX_MSG_SIZE] = '\0';
-        printf("SL New ID: %s\n", sl_id);
-    }
-    fd_set read_fds;
-    int max_fd = sl_socket;
+    sl_socket = ServerConnect(ip, sl_port);
+    ss_socket = ServerConnect(ip, ss_port);
 
     // Loop de mensagens e comandos do sistema
-    while(1){
+    fd_set read_fds;
+    int max_fd = sl_socket;
+    while(1) {
         FD_ZERO(&read_fds);
         // Aguardando novas requisições do servidor de localização
         FD_SET(sl_socket, &read_fds);
@@ -130,7 +136,7 @@ int main(int argc, char **argv){
                 }
                 break;
             }
-            // check failure: alerta de pane elétrica
+            // check failure: checa se há pane elétrica, e onde
             if (strncmp(buffer, "check failure", 12) == 0) {
                 SendMessage(REQ_SENSSTATUS, ss_id, ss_socket);
                 message msg = ReceiveRawMessage(ss_socket);

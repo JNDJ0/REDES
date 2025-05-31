@@ -23,7 +23,7 @@ int connected_sensors;
  * 
  * @return O socket do peer conectado ou -1 em caso de erro.
  */
-int P2PConnect(const char* ip, int port){
+int P2PConnect(const char* ip, int port) {
     int peer_socket = -1;
     struct sockaddr_in peer_addr;
 
@@ -132,7 +132,7 @@ int P2PConnect(const char* ip, int port){
  * 
  * @return O socket do servidor de sensores ou -1 em caso de erro.
  */
-int SensorConnectMulti(char *ip, int port){
+int SensorConnectMulti(char *ip, int port) {
     struct sockaddr_in serv_addr;
 
     int server_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -163,7 +163,7 @@ int SensorConnectMulti(char *ip, int port){
  * 
  * @return 1 se o programa deve encerrar, 0 caso contrário.
  */
-int TerminalHandler(fd_set read_fds, int peer_socket){
+int TerminalHandler(fd_set read_fds, int peer_socket) {
     char buffer[256];
     // Checa entrada do terminal
     if (FD_ISSET(STDIN_FILENO, &read_fds)) {
@@ -173,7 +173,7 @@ int TerminalHandler(fd_set read_fds, int peer_socket){
         if (strncmp(buffer, "kill", 4) == 0) {
             SendMessage(REQ_DISCPEER, my_id, peer_socket);
             message msg = ReceiveRawMessage(peer_socket);
-            if (msg.type == OK_CODE){
+            if (msg.type == OK_CODE) {
                 printf("Peer %s disconnected.\n", peer_id);
                 close(peer_socket);
             }
@@ -188,10 +188,11 @@ int TerminalHandler(fd_set read_fds, int peer_socket){
  * 
  * @param read_fds O conjunto de descritores de arquivo prontos para leitura.
  * @param peer_socket O socket do peer.
+ * @param role O papel do servidor (0 status, 1 localização).
  * 
  * @return 1 se o socket do peer deve ser trocado, 0 caso contrário.
  */
-int PeerHandler(fd_set read_fds, int peer_socket){
+int PeerHandler(fd_set read_fds, int peer_socket, int role) {
     // Verifica novas requisições dos peers
     if (FD_ISSET(peer_socket, &read_fds)) {
         message msg = ReceiveRawMessage(peer_socket);
@@ -203,9 +204,19 @@ int PeerHandler(fd_set read_fds, int peer_socket){
                 SendMessage(OK_CODE, OK_SUCCESSFUL_DISCONNECT, peer_socket);
                 return 1;
 
+            // Recebendo requisição de checar localização do sensor
             case REQ_CHECKALERT:
-                printf("REQ_CHECKALERT %s\n", msg.payload);
-
+                if (role) {
+                    printf("REQ_CHECKALERT %s\n", msg.payload);
+                    for (int i = 0; i < connected_sensors; i++) {
+                        // Caso o sensor esteja na lista, envia o status
+                        if (strcmp(sensors[i].id, msg.payload) == 0) {
+                            char location_area = CheckLocation(sensors[i].location) + '0';
+                            SendMessage(RES_CHECKALERT, &location_area, peer_socket);
+                            return 0;
+                        }
+                    }
+                }
                 break;
 
             default:
@@ -223,8 +234,9 @@ int PeerHandler(fd_set read_fds, int peer_socket){
  * @param read_fds O conjunto de descritores de arquivo prontos para leitura.
  * @param sensor_listener_socket O socket que escuta por conexões de sensores.
  * @param peer_socket O socket do peer.
+ * @param role O papel do servidor (0 status, 1 localização).
  */
-void SensorConnectionHandler(fd_set read_fds, int sensor_listener_socket, int peer_socket, int role){
+void SensorConnectionHandler(fd_set read_fds, int sensor_listener_socket, int peer_socket, int role) {
     // Verifica novas conexões de sensores
     if (FD_ISSET(sensor_listener_socket, &read_fds)) {
         struct sockaddr_in cli_addr;
@@ -232,7 +244,7 @@ void SensorConnectionHandler(fd_set read_fds, int sensor_listener_socket, int pe
         int new_socket = accept(sensor_listener_socket, (struct sockaddr *)&cli_addr, &cli_len);
         message msg = ReceiveRawMessage(new_socket);
             
-        switch(msg.type){
+        switch(msg.type) {
             // Recebendo requisição de conexão do sensor
             case REQ_CONNSEN:
                 // Caso tenha espaço, adiciona o sensor 
@@ -266,46 +278,50 @@ void SensorConnectionHandler(fd_set read_fds, int sensor_listener_socket, int pe
     }
 }
 
-void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket, int role){
+/**
+ * @brief Função que lida com as mensagens recebidas dos sensores.
+ * 
+ * @param read_fds O conjunto de descritores de arquivo prontos para leitura.
+ * @param sensors A lista de sensores conectados.
+ * @param peer_socket O socket do peer.
+ * @param role O papel do servidor (0 status, 1 localização).
+ */
+void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket, int role) {
     // Verifica mensagens dos sensores
     for (int i = 0; i < connected_sensors; i++) {
         if (FD_ISSET(sensors[i].socket_fd, &read_fds)) {
             message msg = ReceiveRawMessage(sensors[i].socket_fd);
-            switch(msg.type){
+            switch(msg.type) {
                 // Recebendo requisição de desconexão do sensor
                 case REQ_DISCSEN:
                     for (int i = 0; i < connected_sensors; i++) {
                         // Caso o sensor esteja na lista, o remove
                         if (strcmp(sensors[i].id, msg.payload) == 0) {
-                            if (role){
-                                printf("Client %s removed (Loc: %d)\n", sensors[i].id, sensors[i].location);
-                            }
-                            else {
-                                printf("Client %s removed (Status: %d)\n", sensors[i].id, sensors[i].status);
-                            }
+                            if (role) printf("Client %s removed (Loc: %d)\n", sensors[i].id, sensors[i].location);
+                            else printf("Client %s removed (Status: %d)\n", sensors[i].id, sensors[i].status);
+
                             SendMessage(OK_CODE, OK_SUCCESSFUL_DISCONNECT, sensors[i].socket_fd);
                             close(sensors[i].socket_fd);
-                            for (int j = i; j < connected_sensors - 1; j++) {
-                                sensors[j] = sensors[j + 1];
-                            }
+                            for (int j = i; j < connected_sensors - 1; j++) sensors[j] = sensors[j + 1];
                             connected_sensors--;
                             break;
                         }
                     }
                     break;
 
-                // Recebendo requisição de status
+                // Recebendo requisição de status do sensor
                 case REQ_SENSSTATUS:
                     if (!role) {
                         printf("REQ_SENSSTATUS %s\n", sensors[i].id);
                         int status = sensors[i].status;
-                        if (status){
+                        // Se for positivo, checa a localização do sensor
+                        if (status) {
                             SendMessage(REQ_CHECKALERT, sensors[i].id, peer_socket);
                             message alert_msg = ReceiveRawMessage(peer_socket);
                             if (alert_msg.type == RES_CHECKALERT) {
                                 SendMessage(RES_SENSSTATUS, alert_msg.payload, sensors[i].socket_fd);
                             }
-                            else if(alert_msg.type == ERROR_CODE) {
+                            else if (alert_msg.type == ERROR_CODE) {
                                 SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, sensors[i].socket_fd);
                             }
                         }
@@ -320,7 +336,7 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
     }
 }
 
-int main(int argc, char **argv){
+int main(int argc, char **argv) {
     // Definindo seed para IDs
     time_t current_time = time(NULL);
     pid_t current_pid = getpid();
@@ -343,9 +359,9 @@ int main(int argc, char **argv){
     // Conectando aos sockets do peer e do sensor
     peer_socket = P2PConnect(ip, peer_port);
     sensor_listener_socket = SensorConnectMulti(ip, sensor_port);
-    fd_set read_fds;
     
     // Loop de mensagens e comandos do sistema
+    fd_set read_fds;
     while (1) {
         FD_ZERO(&read_fds);
         max_fd = sensor_listener_socket;
@@ -376,7 +392,7 @@ int main(int argc, char **argv){
         if (flag) break;
 
         // Checa requisições do peer
-        flag = PeerHandler(read_fds, peer_socket);
+        flag = PeerHandler(read_fds, peer_socket, role);
         if (flag) peer_socket = P2PConnect(ip, peer_port);
 
         // Checa novas conexões de sensores

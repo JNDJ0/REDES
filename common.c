@@ -80,7 +80,6 @@ void GenerateRandomID(char *id_buffer) {
     id_buffer[10] = '\0';
 }
 
-
 /**
  * @brief Envia uma mensagem para um socket.
  * 
@@ -108,4 +107,30 @@ message ReceiveRawMessage(int socket_fd) {
     message msg;
     ssize_t n = read(socket_fd, &msg, sizeof(msg));
     return msg;
+}
+
+/**
+ * @brief Verifica a localização de um sensor e retorna uma região.
+ * 
+ * @param location A localização do sensor.
+ * @return A região correspondente à localização (1: Norte, 2: Sul, 3: Leste, 4: Oeste).
+ */
+int CheckLocation(int location){
+    // Norte
+    if (location >= 1 && location < 3) {
+        return 1;
+    }
+    // Sul
+    else if (location == 4 || location == 5) {
+        return 2;
+    }
+    // Leste
+    else if (location == 6 || location == 7) {
+        return 3;
+    }
+    // Oeste
+    else if (location >= 8 && location < 10) {
+        return 4;
+    }
+    return 0;
 }
