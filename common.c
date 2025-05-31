@@ -26,13 +26,14 @@
 #define RES_CONNSEN 24 // Resposta de conexão com o sensor, com o ID do sensor
 #define REQ_DISCSEN 25 // Requisição de desconexão com o sensor, com o ID do sensor
 
-#define REQ_STATALERT 36 // Requisição de alerta de status, com o ID do sensor
-#define RES_STATALERT 37 // Requisição de alerta de status, com a localização do sensor
+#define REQ_CHECKALERT 36 // Requisição de alerta de status, com o ID do sensor
+#define RES_CHECKALERT 37 // Requisição de alerta de status, com a localização do sensor
 #define REQ_SENSLOC 38 // Requisição de localização do sensor, com o ID do sensor
 #define RES_SENSLOC 39 // Resposta de localização do sensor, com o ID da localização
 #define REQ_LOCLIST 40 // Requisição de lista de locais, com o status (palpite) e o ID da localização
 #define RES_LOCLIST 41 // Resposta de lista de locais, com todos os IDs de sensores que tiverem o status na req
-#define REQ_AREALOG 42 // Requisição de sensores ativos em uma área, com o ID da área
+#define REQ_SENSSTATUS 43 // Requisição de informação sobre o status do sensor. 
+#define RES_SENSSTATUS 44 // Resposta com o ID da região onde ocorre a falha, se houver.
 
 #define OK_CODE 0 // Código de sucesso, onde o payload pode ser as mensagens de sucesso logo abaixo.
 #define OK_SUCCESSFUL_DISCONNECT "01"
@@ -49,6 +50,13 @@ typedef struct {
     int type;
     char payload[MAX_MSG_SIZE]; // loc @ id
 } message;
+
+typedef struct {
+    char id[SENSOR_ID_LEN + 1]; // ID do sensor
+    int status; // Status do sensor (0 ou 1)
+    int location; // Localização do sensor
+    int socket_fd; // Descritor do socket do sensor
+} sensor_info;
 
 /**
  * @brief Exibe uma mensagem de erro e encerra o programa.
