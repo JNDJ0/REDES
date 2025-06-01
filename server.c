@@ -3,8 +3,7 @@
 /*
 ./server 127.0.0.1 64000 60000
 ./server 127.0.0.1 64000 61000
-./sensor 127.0.0.1 60000
-./sensor 127.0.0.1 61000
+./sensor 127.0.0.1 60000 61000
 */
 
 char my_id[10];
@@ -23,7 +22,7 @@ int connected_sensors;
  * 
  * @return O socket do peer conectado ou -1 em caso de erro.
  */
-int P2PConnect(const char* ip, int port) {
+int P2PConnect(char* ip, int port) {
     int peer_socket = -1;
     struct sockaddr_in peer_addr;
 
@@ -48,8 +47,8 @@ int P2PConnect(const char* ip, int port) {
         message msg = ReceiveRawMessage(connector_socket);
         if (msg.type == RES_CONNPEER) {
             // Recebendo ID dado pelo peer
-            strncpy(my_id, msg.payload, MAX_MSG_SIZE);
-            my_id[MAX_MSG_SIZE] = '\0';
+            strncpy(my_id, msg.payload, ID_LEN);
+            my_id[ID_LEN] = '\0';
             printf("New Peer ID: %s\n", my_id);
 
             // Dando ID ao peer conectado
@@ -108,8 +107,8 @@ int P2PConnect(const char* ip, int port) {
                 msg = ReceiveRawMessage(peer_socket);
                 if (msg.type == RES_CONNPEER) {
                     char* assigned_id = msg.payload;
-                    strncpy(my_id, assigned_id, MAX_MSG_SIZE);
-                    my_id[MAX_MSG_SIZE] = '\0';
+                    strncpy(my_id, assigned_id, ID_LEN);
+                    my_id[ID_LEN] = '\0';
                     printf("New Peer ID: %s\n", my_id);
                 }
                 return peer_socket; 
@@ -132,7 +131,7 @@ int P2PConnect(const char* ip, int port) {
  * 
  * @return O socket do servidor de sensores ou -1 em caso de erro.
  */
-int SensorConnectMulti(char *ip, int port) {
+int SensorConnect(char *ip, int port) {
     struct sockaddr_in serv_addr;
 
     int server_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -150,7 +149,7 @@ int SensorConnectMulti(char *ip, int port) {
         error("ERROR on binding");
     }
 
-    if (listen(server_socket, 5) < 0) error("ERROR on listen");
+    if (listen(server_socket, 15) < 0) error("ERROR on listen");
 
     return server_socket;
 }
@@ -328,6 +327,52 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
                     }   
                     break;
 
+                // Recebendo requisição de localização do sensor
+                case REQ_SENSLOC:
+                    if (role) {
+                        printf("REQ_SENSLOC %s\n", sensors[i].id);
+                        for (int j = 0; j < connected_sensors; j++) {
+                            if (strcmp(sensors[j].id, msg.payload) == 0) {
+                                char location = sensors[j].location + '0';
+                                SendMessage(RES_SENSLOC, &location, sensors[i].socket_fd);
+                            }
+                        }
+                    }
+                    break;
+
+                // Recebendo requisição de listar sensores na localização
+                case REQ_LOCLIST:
+                    if (role) {
+                        char payload[MAX_MSG_SIZE];  
+                        strcpy(payload, msg.payload);  
+                        char *id = strtok(payload, "@");
+                        char *loc = strtok(NULL, "@");
+                        
+                        if (id != NULL && loc != NULL) {
+                            printf("REQ_LOCLIST %s %s\n", id, loc);
+                            char answer[MAX_MSG_SIZE] = "";
+                            int location = atoi(loc);
+                            for (int j = 0; j < connected_sensors; j++) {
+                                if (strcmp(sensors[j].id, id) == 0 && sensors[j].location == location) {
+                                    if (strlen(answer) > 0) {
+                                        strcat(answer, ",");
+                                    }
+                                    strcat(answer, sensors[j].id);
+                                }
+                            }
+                            if (strlen(answer) > 0) {
+                                SendMessage(RES_LOCLIST, answer, sensors[i].socket_fd);
+                            } 
+                            else {
+                                SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, sensors[i].socket_fd);
+                            }
+                        } 
+                        else {
+                            printf("Erro ao interpretar o payload.\n");
+                        }
+                    }
+                    break;
+
                 default:
                     error("3. Mensagem desconhecida recebida");
                     break;
@@ -341,7 +386,7 @@ int main(int argc, char **argv) {
     time_t current_time = time(NULL);
     pid_t current_pid = getpid();
     unsigned int seed = current_time ^ current_pid;
-    srand(seed);
+    // srand(seed);
 
     char* ip;
     char buffer[256];
@@ -358,7 +403,7 @@ int main(int argc, char **argv) {
 
     // Conectando aos sockets do peer e do sensor
     peer_socket = P2PConnect(ip, peer_port);
-    sensor_listener_socket = SensorConnectMulti(ip, sensor_port);
+    sensor_listener_socket = SensorConnect(ip, sensor_port);
     
     // Loop de mensagens e comandos do sistema
     fd_set read_fds;

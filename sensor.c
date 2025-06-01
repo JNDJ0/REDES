@@ -19,29 +19,131 @@ int ServerConnect(char *ip, int port) {
 
     bzero((char *)&serv_addr, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = inet_addr(ip);
+    if (inet_pton(AF_INET, ip, &serv_addr.sin_addr) <= 0) {
+        close(sock);
+        error("ERROR invalid IP address");
+    }
     serv_addr.sin_port = htons(port);
 
+    // Conectando ao socket do servidor
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
         error("ERROR connecting");
     }
 
+    // Recebendo IDs dos servidores
     SendMessage(REQ_CONNSEN, &location_id, sock);
     message msg = ReceiveRawMessage(sock);
     if (msg.type == RES_CONNSEN){
         if (port == SL_CLIENT_LISTEN_PORT_DEFAULT) {
-            strncpy(sl_id, msg.payload, MAX_MSG_SIZE);
-            sl_id[MAX_MSG_SIZE] = '\0';
+            strncpy(sl_id, msg.payload, ID_LEN);
+            sl_id[ID_LEN] = '\0';
             printf("SL New ID: %s\n", sl_id);
         }
         else if (port == SS_CLIENT_LISTEN_PORT_DEFAULT) {
-            strncpy(ss_id, msg.payload, MAX_MSG_SIZE);
-            ss_id[MAX_MSG_SIZE] = '\0';
+            strncpy(ss_id, msg.payload, ID_LEN);
+            ss_id[ID_LEN] = '\0';
             printf("SS New ID: %s\n", ss_id);
         }
     }
+    else if (msg.type == ERROR_CODE){
+        printf("Received error %s from server\n", msg.payload);
+        return -1;
+    }
 
     return sock;
+}
+
+/**
+ * @brief Função que lida com a entrada do terminal.
+ * 
+ * @param read_fds O conjunto de descritores de arquivo prontos para leitura.
+ * @param sl_socket O socket do servidor de localização.
+ * @param ss_socket O socket do servidor de status.
+ *
+ * @return 1 se deve parar a execução, 0 caso contrário.
+ */
+int TerminalHandler(fd_set read_fds, int sl_socket, int ss_socket) {
+    // Verifica entrada do terminal
+    char buffer[256];
+    if (FD_ISSET(STDIN_FILENO, &read_fds))  {
+        bzero(buffer, 256);
+        fgets(buffer, 255, stdin);
+        
+        // kill: encerra comunicações com os servidores.
+        if (strncmp(buffer, "kill", 4) == 0) {
+            SendMessage(REQ_DISCSEN, ss_id, ss_socket);
+            SendMessage(REQ_DISCSEN, sl_id, sl_socket);
+            message msg = ReceiveRawMessage(ss_socket);
+            if (msg.type == OK_CODE){
+                printf("SS Successful disconnect\n");
+                close(ss_socket);
+            }
+            msg = ReceiveRawMessage(sl_socket);
+            if (msg.type == OK_CODE){
+                printf("SL Successful disconnect\n");
+                close(sl_socket);
+            }
+            return 1;
+        }
+        
+        // check failure: checa se há pane elétrica, e onde
+        if (strncmp(buffer, "check failure", 12) == 0) {
+            SendMessage(REQ_SENSSTATUS, ss_id, ss_socket);
+            message msg = ReceiveRawMessage(ss_socket);
+            if (msg.type == RES_SENSSTATUS) {
+                if (strncmp(msg.payload, "1", 1) == 0) {
+                    printf("Alert received from location: 1 (Norte)\n");
+                } 
+                else if (strncmp(msg.payload, "2", 1) == 0) {
+                    printf("Alert received from location: 2 (Sul)\n");
+                } 
+                else if (strncmp(msg.payload, "3", 1) == 0) {
+                    printf("Alert received from location: 3 (Leste)\n");
+                } 
+                else if (strncmp(msg.payload, "4", 1) == 0) {
+                    printf("Alert received from location: 4 (Oeste)\n");
+                } 
+            }
+            else if (msg.type == ERROR_CODE) {
+                printf("Sensor not found\n");
+            }
+        }
+        
+        // locate: checa onde o sensor está
+        if (strncmp(buffer, "locate", 6) == 0) {
+            SendMessage(REQ_SENSLOC, sl_id, sl_socket);
+            message msg = ReceiveRawMessage(sl_socket);
+            if (msg.type == RES_SENSLOC) {
+                printf("Current sensor location: %s\n", msg.payload);
+            }
+            else if (msg.type == ERROR_CODE) {
+                printf("Sensor not found\n");
+            }
+        }
+        
+        // diagnose: lista de quais sensores estão na localização informada
+        if (strncmp(buffer, "diagnose", 8) == 0){
+            char *token = strtok(buffer, " ");
+            token = strtok(NULL, " ");  
+            
+            if (token != NULL) {
+                token[strcspn(token, "\n")] = '\0';
+                char payload[MAX_MSG_SIZE];
+                snprintf(payload, MAX_MSG_SIZE, "%s@%s", sl_id, token);
+                
+                SendMessage(REQ_LOCLIST, payload, sl_socket);
+                message msg = ReceiveRawMessage(sl_socket);
+                if (msg.type == RES_LOCLIST) {
+                    printf("Sensors at location %s: %s\n", token, msg.payload);
+                }
+                else if (msg.type == ERROR_CODE) {
+                    printf("Location not found\n");
+                }
+            }
+        }
+    }
+
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -70,6 +172,7 @@ int main(int argc, char **argv) {
     location_id = (rand() % 10) + '0';
     sl_socket = ServerConnect(ip, sl_port);
     ss_socket = ServerConnect(ip, ss_port);
+    if (sl_socket < 0 || ss_socket < 0) return 1;
 
     // Loop de mensagens e comandos do sistema
     fd_set read_fds;
@@ -87,7 +190,6 @@ int main(int argc, char **argv) {
         if (sl_socket > max_fd) max_fd = sl_socket;
         if (ss_socket > max_fd) max_fd = ss_socket;
         if (STDIN_FILENO > max_fd) max_fd = STDIN_FILENO;
-        
         int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
         if (activity < 0) {
             perror("Erro em select");
@@ -102,7 +204,6 @@ int main(int argc, char **argv) {
                 printf("SS desconectado.\n");
                 break;
             }
-            printf("Recebido do SS: %s", buffer);
         }
 
         // Verifica entrada do servidor de localização
@@ -113,52 +214,11 @@ int main(int argc, char **argv) {
                 printf("SL desconectado.\n");
                 break;
             }
-            printf("Recebido do SL: %s", buffer);
         }
 
         // Verifica entrada do terminal
-        if (FD_ISSET(STDIN_FILENO, &read_fds))  {
-            bzero(buffer, 256);
-            fgets(buffer, 255, stdin);
-            // kill: encerra comunicações com os servidores.
-            if (strncmp(buffer, "kill", 4) == 0) {
-                SendMessage(REQ_DISCSEN, ss_id, ss_socket);
-                SendMessage(REQ_DISCSEN, sl_id, sl_socket);
-                message msg = ReceiveRawMessage(ss_socket);
-                if (msg.type == OK_CODE){
-                    printf("SS Successful disconnect\n");
-                    close(ss_socket);
-                }
-                msg = ReceiveRawMessage(sl_socket);
-                if (msg.type == OK_CODE){
-                    printf("SL Successful disconnect\n");
-                    close(sl_socket);
-                }
-                break;
-            }
-            // check failure: checa se há pane elétrica, e onde
-            if (strncmp(buffer, "check failure", 12) == 0) {
-                SendMessage(REQ_SENSSTATUS, ss_id, ss_socket);
-                message msg = ReceiveRawMessage(ss_socket);
-                if (msg.type == RES_SENSSTATUS) {
-                    if (strncmp(msg.payload, "1", 1) == 0) {
-                        printf("Alert received from location: 1 (Norte)\n");
-                    } 
-                    else if (strncmp(msg.payload, "2", 1) == 0) {
-                        printf("Alert received from location: 2 (Sul)\n");
-                    } 
-                    else if (strncmp(msg.payload, "3", 1) == 0) {
-                        printf("Alert received from location: 3 (Leste)\n");
-                    } 
-                    else if (strncmp(msg.payload, "4", 1) == 0) {
-                        printf("Alert received from location: 4 (Oeste)\n");
-                    } 
-                }
-                else if (msg.type == ERROR_CODE) {
-                    printf("No sensor found\n");
-                }
-            }
-        }
+        int flag = TerminalHandler(read_fds, sl_socket, ss_socket);
+        if (flag) break;
     }
 
     close(ss_socket);

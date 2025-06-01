@@ -11,10 +11,10 @@
 #include <netinet/in.h>
 #include <sys/select.h>
 
+#define ID_LEN 10
 #define MAX_PEERS 2
-#define MAX_SENSORS 2
-#define MAX_MSG_SIZE 500 // Em bytes
-#define SENSOR_ID_LEN 10
+#define MAX_SENSORS 15
+#define MAX_MSG_SIZE 500 
 #define P2P_PORT_DEFAULT 64000
 #define SL_CLIENT_LISTEN_PORT_DEFAULT 60000
 #define SS_CLIENT_LISTEN_PORT_DEFAULT 61000
@@ -48,14 +48,14 @@
 
 typedef struct {
     int type;
-    char payload[MAX_MSG_SIZE]; // loc @ id
+    char payload[MAX_MSG_SIZE]; 
 } message;
 
 typedef struct {
-    char id[SENSOR_ID_LEN + 1]; // ID do sensor
-    int status; // Status do sensor (0 ou 1)
-    int location; // Localização do sensor
-    int socket_fd; // Descritor do socket do sensor
+    int status; 
+    int location; 
+    int socket_fd; 
+    char id[ID_LEN + 1]; 
 } sensor_info;
 
 /**
