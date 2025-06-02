@@ -247,6 +247,7 @@ int PeerHandler(fd_set read_fds, int peer_socket, int role) {
             // Recebendo requisição de checar localização do sensor
             case REQ_CHECKALERT:
                 if (role) {
+                    int error_check = 0;
                     printf("REQ_CHECKALERT %s\n", msg.payload);
                     for (int i = 0; i < connected_sensors; i++) {
                         // Caso o sensor esteja na lista, envia o status
@@ -255,6 +256,10 @@ int PeerHandler(fd_set read_fds, int peer_socket, int role) {
                             SendMessage(RES_CHECKALERT, &location_area, peer_socket);
                             break;
                         }
+                        else error_check++;
+                    }
+                    if (error_check == connected_sensors){
+                        SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, peer_socket);
                     }
                 }
                 break;
@@ -296,6 +301,7 @@ void SensorConnectionHandler(fd_set read_fds, int sensor_listener_socket, int pe
                         printf("Client %s added (Loc: %d)\n", new_sensor.id, new_sensor.location);
                     }
                     else {
+                        // GenerateRandomID(new_sensor.id);                        
                         strncpy(new_sensor.id, msg.payload, ID_LEN);
                         new_sensor.status = rand() % 2;
                         printf("Client %s added (Status: %d)\n", new_sensor.id, new_sensor.status);
@@ -426,7 +432,7 @@ int main(int argc, char **argv) {
     time_t current_time = time(NULL);
     pid_t current_pid = getpid();
     unsigned int seed = current_time ^ current_pid;
-    // srand(seed);
+    srand(seed);
 
     char* ip;
     char buffer[256];
@@ -479,7 +485,10 @@ int main(int argc, char **argv) {
 
         // Checa requisições do peer
         flag = PeerHandler(read_fds, peer_socket, role);
-        if (flag) peer_socket = P2PConnect(ip, peer_port);
+        if (flag){
+            peer_socket = P2PConnect(ip, peer_port);
+            if (peer_socket < 0) return 1;
+        }
 
         // Checa novas conexões de sensores
         SensorConnectionHandler(read_fds, sensor_listener_socket, peer_socket, role);

@@ -66,7 +66,7 @@ int ServerConnect(char *ip, int port) {
     //         printf("SL New ID: %s\n", sl_id);
     //     }
     //     else if (port == SS_CLIENT_LISTEN_PORT_DEFAULT) {
-    //         strncpy(sl_id, msg.payload, ID_LEN);
+    //         strncpy(ss_id, msg.payload, ID_LEN);
     //         ss_id[ID_LEN] = '\0';
     //         printf("SS New ID: %s\n", ss_id);
     //     }
