@@ -290,12 +290,13 @@ void SensorConnectionHandler(fd_set read_fds, int sensor_listener_socket, int pe
                 // Caso tenha espaço, adiciona o sensor 
                 if (connected_sensors < MAX_SENSORS) {
                     sensor_info new_sensor;
-                    GenerateRandomID(new_sensor.id);
                     if (role) {
+                        GenerateRandomID(new_sensor.id);
                         new_sensor.location = atoi(msg.payload);
                         printf("Client %s added (Loc: %d)\n", new_sensor.id, new_sensor.location);
                     }
                     else {
+                        strncpy(new_sensor.id, msg.payload, ID_LEN);
                         new_sensor.status = rand() % 2;
                         printf("Client %s added (Status: %d)\n", new_sensor.id, new_sensor.status);
                     }

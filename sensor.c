@@ -30,25 +30,51 @@ int ServerConnect(char *ip, int port) {
         error("ERROR connecting");
     }
 
-    // Recebendo IDs dos servidores
-    SendMessage(REQ_CONNSEN, &location_id, sock);
-    message msg = ReceiveRawMessage(sock);
-    if (msg.type == RES_CONNSEN){
-        if (port == SL_CLIENT_LISTEN_PORT_DEFAULT) {
+    // Estabelecendo conexão com os servidores
+    if (port == SL_CLIENT_LISTEN_PORT_DEFAULT){
+        SendMessage(REQ_CONNSEN, &location_id, sock);
+        message msg = ReceiveRawMessage(sock);
+        if (msg.type == RES_CONNSEN){
             strncpy(sl_id, msg.payload, ID_LEN);
             sl_id[ID_LEN] = '\0';
             printf("SL New ID: %s\n", sl_id);
         }
-        else if (port == SS_CLIENT_LISTEN_PORT_DEFAULT) {
-            strncpy(ss_id, msg.payload, ID_LEN);
+        else if (msg.type == ERROR_CODE){
+            printf("Received error %s from server\n", msg.payload);
+            return -1;
+        }
+    }
+    else if (port == SS_CLIENT_LISTEN_PORT_DEFAULT){
+        SendMessage(REQ_CONNSEN, sl_id, sock);
+        message msg = ReceiveRawMessage(sock);
+        if (msg.type == RES_CONNSEN){
+            strncpy(ss_id, sl_id, ID_LEN);
             ss_id[ID_LEN] = '\0';
             printf("SS New ID: %s\n", ss_id);
         }
+        else if (msg.type == ERROR_CODE){
+            printf("Received error %s from server\n", msg.payload);
+            return -1;
+        }
     }
-    else if (msg.type == ERROR_CODE){
-        printf("Received error %s from server\n", msg.payload);
-        return -1;
-    }
+    // SendMessage(REQ_CONNSEN, &location_id, sock);
+    // message msg = ReceiveRawMessage(sock);
+    // if (msg.type == RES_CONNSEN){
+    //     if (port == SL_CLIENT_LISTEN_PORT_DEFAULT) {
+    //         strncpy(sl_id, msg.payload, ID_LEN);
+    //         sl_id[ID_LEN] = '\0';
+    //         printf("SL New ID: %s\n", sl_id);
+    //     }
+    //     else if (port == SS_CLIENT_LISTEN_PORT_DEFAULT) {
+    //         strncpy(sl_id, msg.payload, ID_LEN);
+    //         ss_id[ID_LEN] = '\0';
+    //         printf("SS New ID: %s\n", ss_id);
+    //     }
+    // }
+    // else if (msg.type == ERROR_CODE){
+    //     printf("Received error %s from server\n", msg.payload);
+    //     return -1;
+    // }
 
     return sock;
 }
