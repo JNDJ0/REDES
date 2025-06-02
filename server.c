@@ -58,6 +58,12 @@ int P2PConnect(char* ip, int port) {
             SendMessage(RES_CONNPEER, peer_id, peer_socket);
             return peer_socket;
         }
+        else if (msg.type == ERROR_CODE) {
+            char *message = "P2P: Error ";
+            strcat(message, msg.payload);
+            strcat(message, ": peer limit exceeded");
+            error(message);
+        }
     } 
     else {
         // Nenhum peer aberto; começar a ouvir por possíveis conexões
@@ -84,39 +90,74 @@ int P2PConnect(char* ip, int port) {
             close(listener_socket);
             error("P2P: ERROR on listen");
         }
+    
+        // Implementando select para permitir que o servidor digite kill e encerre as tentativas
+        fd_set read_fds;
+        int max_fd = (listener_socket > STDIN_FILENO) ? listener_socket : STDIN_FILENO;
+        while(1){
+            FD_ZERO(&read_fds);
+            FD_SET(listener_socket, &read_fds);
+            FD_SET(STDIN_FILENO, &read_fds);
 
-        // Aceitando a conexão feita
-        struct sockaddr_in connected_peer_addr;
-        socklen_t peer_len = sizeof(connected_peer_addr);
-        peer_socket = accept(listener_socket, (struct sockaddr *)&connected_peer_addr, &peer_len);
-        close(listener_socket);
-        char connected_peer_ip_str[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &connected_peer_addr.sin_addr, connected_peer_ip_str, INET_ADDRSTRLEN);
-        
-        // Conexão bem sucedida: receber REQ e enviar RES
-        if (peer_socket >= 0) {
-            connected_peers++;
-            message msg = ReceiveRawMessage(peer_socket);
-            if (msg.type == REQ_CONNPEER) {
-                // Gerando ID ao peer conectado
-                GenerateRandomID(peer_id);
-                printf("Peer %s connected\n", peer_id);
-                SendMessage(RES_CONNPEER, peer_id, peer_socket);
+            // Trocando prioridade de leitura
+            if (listener_socket > max_fd) max_fd = listener_socket;
+            if (STDIN_FILENO > max_fd) max_fd = STDIN_FILENO;
 
-                // Recebendo ID dado pelo peer conectado
-                msg = ReceiveRawMessage(peer_socket);
-                if (msg.type == RES_CONNPEER) {
-                    char* assigned_id = msg.payload;
-                    strncpy(my_id, assigned_id, ID_LEN);
-                    my_id[ID_LEN] = '\0';
-                    printf("New Peer ID: %s\n", my_id);
-                }
-                return peer_socket; 
+            int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+            if (activity < 0) {
+                error("P2P: ERROR in select");
+                close(listener_socket);
+                return -1;
             }
-        }
-        else {
-            close(peer_socket);
-            error("P2P: ERROR on peer connection");
+
+            // Checa entrada do terminal
+            if (FD_ISSET(STDIN_FILENO, &read_fds)) {
+                char buffer[256];
+                bzero(buffer, 256);
+                fgets(buffer, 255, stdin);
+                if (strncmp(buffer, "kill", 4) == 0) {
+                    close(listener_socket);
+                    return -1; 
+                }
+            }
+
+            // Checa novas conexões de peers
+            if (FD_ISSET(listener_socket, &read_fds)) {
+                // Aceitando a conexão feita
+                struct sockaddr_in connected_peer_addr;
+                socklen_t peer_len = sizeof(connected_peer_addr);
+                peer_socket = accept(listener_socket, (struct sockaddr *)&connected_peer_addr, &peer_len);
+                close(listener_socket);
+                char connected_peer_ip_str[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, &connected_peer_addr.sin_addr, connected_peer_ip_str, INET_ADDRSTRLEN);
+                
+                // Conexão bem sucedida: receber REQ e enviar RES
+                if (peer_socket >= 0) {
+                    connected_peers++;
+                    message msg = ReceiveRawMessage(peer_socket);
+                    if (msg.type == REQ_CONNPEER) {
+                        // Gerando ID ao peer conectado
+                        GenerateRandomID(peer_id);
+                        printf("Peer %s connected\n", peer_id);
+                        SendMessage(RES_CONNPEER, peer_id, peer_socket);
+                        
+                        // Recebendo ID dado pelo peer conectado
+                        msg = ReceiveRawMessage(peer_socket);
+                        if (msg.type == RES_CONNPEER) {
+                            char* assigned_id = msg.payload;
+                            strncpy(my_id, assigned_id, ID_LEN);
+                            my_id[ID_LEN] = '\0';
+                            printf("New Peer ID: %s\n", my_id);
+                        }
+                        return peer_socket; 
+                    }
+                }
+                else {
+                    close(peer_socket);
+                    error("P2P: ERROR on peer connection");
+                }
+                break;
+            }
         }
     }
 
@@ -135,7 +176,7 @@ int SensorConnect(char *ip, int port) {
     struct sockaddr_in serv_addr;
 
     int server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket < 0) error("ERROR opening socket");
+    if (server_socket < 0) error("CLI: ERROR opening socket");
 
     int optval = 1;
     setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
@@ -146,10 +187,10 @@ int SensorConnect(char *ip, int port) {
     serv_addr.sin_port = htons(port);
 
     if (bind(server_socket, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        error("ERROR on binding");
+        error("CLI: ERROR on binding");
     }
 
-    if (listen(server_socket, 15) < 0) error("ERROR on listen");
+    if (listen(server_socket, 15) < 0) error("CLI: ERROR on listen");
 
     return server_socket;
 }
@@ -212,14 +253,14 @@ int PeerHandler(fd_set read_fds, int peer_socket, int role) {
                         if (strcmp(sensors[i].id, msg.payload) == 0) {
                             char location_area = CheckLocation(sensors[i].location) + '0';
                             SendMessage(RES_CHECKALERT, &location_area, peer_socket);
-                            return 0;
+                            break;
                         }
                     }
                 }
                 break;
 
             default:
-                error("1. Mensagem desconhecida recebida");
+                error("P2P: Mensagem desconhecida recebida");
                 break;
         }               
     }
@@ -271,7 +312,7 @@ void SensorConnectionHandler(fd_set read_fds, int sensor_listener_socket, int pe
                 break;
 
             default:
-                error("2. Mensagem desconhecida recebida");
+                error("CLI: Mensagem desconhecida recebida");
                 break;
         }
     }
@@ -353,7 +394,8 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
                             char answer[MAX_MSG_SIZE] = "";
                             int location = atoi(loc);
                             for (int j = 0; j < connected_sensors; j++) {
-                                if (strcmp(sensors[j].id, id) == 0 && sensors[j].location == location) {
+                                // if (strcmp(sensors[j].id, id) == 0 && sensors[j].location == location) {
+                                if (sensors[j].location == location) {    
                                     if (strlen(answer) > 0) {
                                         strcat(answer, ",");
                                     }
@@ -366,15 +408,12 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
                             else {
                                 SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, sensors[i].socket_fd);
                             }
-                        } 
-                        else {
-                            printf("Erro ao interpretar o payload.\n");
                         }
                     }
                     break;
 
                 default:
-                    error("3. Mensagem desconhecida recebida");
+                    error("CLI: Mensagem desconhecida recebida");
                     break;
             }
         }
@@ -403,6 +442,7 @@ int main(int argc, char **argv) {
 
     // Conectando aos sockets do peer e do sensor
     peer_socket = P2PConnect(ip, peer_port);
+    if (peer_socket < 0) return 1;
     sensor_listener_socket = SensorConnect(ip, sensor_port);
     
     // Loop de mensagens e comandos do sistema

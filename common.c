@@ -101,6 +101,7 @@ void SendMessage(int type, char* payload, int socket_fd) {
  * @brief Recebe uma mensagem de um socket.
  * 
  * @param socket_fd O descritor do socket de onde a mensagem será recebida.
+ *
  * @return A mensagem recebida.
  */
 message ReceiveRawMessage(int socket_fd) {
@@ -113,6 +114,7 @@ message ReceiveRawMessage(int socket_fd) {
  * @brief Verifica a localização de um sensor e retorna uma região.
  * 
  * @param location A localização do sensor.
+ *
  * @return A região correspondente à localização (1: Norte, 2: Sul, 3: Leste, 4: Oeste).
  */
 int CheckLocation(int location){
