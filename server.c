@@ -58,12 +58,6 @@ int P2PConnect(char* ip, int port) {
             SendMessage(RES_CONNPEER, peer_id, peer_socket);
             return peer_socket;
         }
-        else if (msg.type == ERROR_CODE) {
-            char *message = "P2P: Error ";
-            strcat(message, msg.payload);
-            strcat(message, ": peer limit exceeded");
-            error(message);
-        }
     } 
     else {
         // Nenhum peer aberto; começar a ouvir por possíveis conexões
@@ -96,7 +90,9 @@ int P2PConnect(char* ip, int port) {
         int max_fd = (listener_socket > STDIN_FILENO) ? listener_socket : STDIN_FILENO;
         while(1){
             FD_ZERO(&read_fds);
+            // Escutando por um novo peer
             FD_SET(listener_socket, &read_fds);
+            // Escutando por entrada do terminal
             FD_SET(STDIN_FILENO, &read_fds);
 
             // Trocando prioridade de leitura
@@ -401,7 +397,6 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
                             char answer[MAX_MSG_SIZE] = "";
                             int location = atoi(loc);
                             for (int j = 0; j < connected_sensors; j++) {
-                                // if (strcmp(sensors[j].id, id) == 0 && sensors[j].location == location) {
                                 if (sensors[j].location == location) {    
                                     if (strlen(answer) > 0) {
                                         strcat(answer, ",");
