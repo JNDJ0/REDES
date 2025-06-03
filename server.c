@@ -6,9 +6,8 @@
 ./sensor 127.0.0.1 60000 61000
 */
 
-char my_id[10];
-
-char peer_id[10];
+char my_id[ID_LEN + 1];
+char peer_id[ID_LEN + 1];
 int connected_peers;
 
 sensor_info sensors[MAX_SENSORS];
@@ -75,7 +74,10 @@ int P2PConnect(char* ip, int port) {
         struct sockaddr_in my_listen_addr;
         bzero((char *)&my_listen_addr, sizeof(my_listen_addr));
         my_listen_addr.sin_family = AF_INET;
-        my_listen_addr.sin_addr.s_addr = INADDR_ANY; 
+        if (inet_pton(AF_INET, ip, &peer_addr.sin_addr) <= 0) {
+            close(listener_socket);
+            error("P2P: Invalid peer target IP address");
+        }
         my_listen_addr.sin_port = htons(port);
         if (bind(listener_socket, (struct sockaddr *)&my_listen_addr, sizeof(my_listen_addr)) < 0) {
             error("P2P: ERROR on binding listener socket"); 
@@ -127,7 +129,7 @@ int P2PConnect(char* ip, int port) {
                 char connected_peer_ip_str[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, &connected_peer_addr.sin_addr, connected_peer_ip_str, INET_ADDRSTRLEN);
                 
-                // Conexão bem sucedida: receber REQ e enviar RES
+                // Conexão bem sucedida; necessário gerar e enviar o ID ao novo peer.
                 if (peer_socket >= 0) {
                     connected_peers++;
                     message msg = ReceiveRawMessage(peer_socket);
@@ -179,7 +181,10 @@ int SensorConnect(char *ip, int port) {
 
     bzero((char *)&serv_addr, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = inet_addr(ip);
+    if (inet_pton(AF_INET, ip, &serv_addr.sin_addr) <= 0) {
+        close(server_socket);
+        error("CLI: Invalid peer target IP address");
+    }
     serv_addr.sin_port = htons(port);
 
     if (bind(server_socket, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
@@ -292,19 +297,18 @@ void SensorConnectionHandler(fd_set read_fds, int sensor_listener_socket, int pe
                 if (connected_sensors < MAX_SENSORS) {
                     sensor_info new_sensor;
                     if (role) {
-                        GenerateRandomID(new_sensor.id);
-                        new_sensor.location = atoi(msg.payload);
+                        strncpy(new_sensor.id, msg.payload, ID_LEN);
+                        new_sensor.location = rand() % 10;
                         printf("Client %s added (Loc: %d)\n", new_sensor.id, new_sensor.location);
                     }
                     else {
-                        // GenerateRandomID(new_sensor.id);                        
                         strncpy(new_sensor.id, msg.payload, ID_LEN);
                         new_sensor.status = rand() % 2;
                         printf("Client %s added (Status: %d)\n", new_sensor.id, new_sensor.status);
                     }
                     new_sensor.socket_fd = new_socket;
                     sensors[connected_sensors] = new_sensor;
-                    SendMessage(RES_CONNSEN, new_sensor.id, new_socket);
+                    SendMessage(RES_CONNSEN, "", new_socket);
                     connected_sensors++;
                 } 
                 // Caso não tenha espaço, envia erro

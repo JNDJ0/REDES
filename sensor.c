@@ -1,8 +1,6 @@
 #include "common.c"
 
-char location_id;
-char sl_id[MAX_MSG_SIZE + 1];
-char ss_id[MAX_MSG_SIZE + 1];
+char my_id[ID_LEN + 1];
 
 /**
  * @brief Conecta ao servidor em um endereço IP e porta especificados.
@@ -30,51 +28,48 @@ int ServerConnect(char *ip, int port) {
         error("ERROR connecting");
     }
 
-    // Estabelecendo conexão com os servidores
-    if (port == SL_CLIENT_LISTEN_PORT_DEFAULT){
-        SendMessage(REQ_CONNSEN, &location_id, sock);
-        message msg = ReceiveRawMessage(sock);
-        if (msg.type == RES_CONNSEN){
-            strncpy(sl_id, msg.payload, ID_LEN);
-            sl_id[ID_LEN] = '\0';
-            printf("SL New ID: %s\n", sl_id);
-        }
-        else if (msg.type == ERROR_CODE){
-            printf("Received error %s from server\n", msg.payload);
-            return -1;
-        }
-    }
-    else if (port == SS_CLIENT_LISTEN_PORT_DEFAULT){
-        SendMessage(REQ_CONNSEN, sl_id, sock);
-        message msg = ReceiveRawMessage(sock);
-        if (msg.type == RES_CONNSEN){
-            strncpy(ss_id, sl_id, ID_LEN);
-            ss_id[ID_LEN] = '\0';
-            printf("SS New ID: %s\n", ss_id);
-        }
-        else if (msg.type == ERROR_CODE){
-            printf("Received error %s from server\n", msg.payload);
-            return -1;
-        }
-    }
-    // SendMessage(REQ_CONNSEN, &location_id, sock);
-    // message msg = ReceiveRawMessage(sock);
-    // if (msg.type == RES_CONNSEN){
-    //     if (port == SL_CLIENT_LISTEN_PORT_DEFAULT) {
-    //         strncpy(sl_id, msg.payload, ID_LEN);
-    //         sl_id[ID_LEN] = '\0';
-    //         printf("SL New ID: %s\n", sl_id);
+    // // Estabelecendo conexão com os servidores
+    // if (port == SL_CLIENT_LISTEN_PORT_DEFAULT){
+    //     SendMessage(REQ_CONNSEN, &location_id, sock);
+    //     message msg = ReceiveRawMessage(sock);
+    //     if (msg.type == RES_CONNSEN){
+    //         strncpy(my_id, msg.payload, ID_LEN);
+    //         my_id[ID_LEN] = '\0';
+    //         printf("SL New ID: %s\n", my_id);
     //     }
-    //     else if (port == SS_CLIENT_LISTEN_PORT_DEFAULT) {
-    //         strncpy(ss_id, msg.payload, ID_LEN);
+    //     else if (msg.type == ERROR_CODE){
+    //         printf("Received error %s from server\n", msg.payload);
+    //         return -1;
+    //     }
+    // }
+    // else if (port == SS_CLIENT_LISTEN_PORT_DEFAULT){
+    //     SendMessage(REQ_CONNSEN, my_id, sock);
+    //     message msg = ReceiveRawMessage(sock);
+    //     if (msg.type == RES_CONNSEN){
+    //         strncpy(ss_id, my_id, ID_LEN);
     //         ss_id[ID_LEN] = '\0';
     //         printf("SS New ID: %s\n", ss_id);
     //     }
+    //     else if (msg.type == ERROR_CODE){
+    //         printf("Received error %s from server\n", msg.payload);
+    //         return -1;
+    //     }
     // }
-    // else if (msg.type == ERROR_CODE){
-    //     printf("Received error %s from server\n", msg.payload);
-    //     return -1;
-    // }
+    // printf("My ID: %s\n", my_id);
+    SendMessage(REQ_CONNSEN, my_id, sock);
+    message msg = ReceiveRawMessage(sock);
+    if (msg.type == RES_CONNSEN){
+        if (port == SL_CLIENT_LISTEN_PORT_DEFAULT) {
+            printf("SL New ID: %s\n", my_id);
+        }
+        else if (port == SS_CLIENT_LISTEN_PORT_DEFAULT) {
+            printf("SS New ID: %s\n", my_id);
+        }
+    }
+    else if (msg.type == ERROR_CODE){
+        printf("Received error %s from server\n", msg.payload);
+        return -1;
+    }
 
     return sock;
 }
@@ -97,8 +92,8 @@ int TerminalHandler(fd_set read_fds, int sl_socket, int ss_socket) {
         
         // kill: encerra comunicações com os servidores.
         if (strncmp(buffer, "kill", 4) == 0) {
-            SendMessage(REQ_DISCSEN, ss_id, ss_socket);
-            SendMessage(REQ_DISCSEN, sl_id, sl_socket);
+            SendMessage(REQ_DISCSEN, my_id, ss_socket);
+            SendMessage(REQ_DISCSEN, my_id, sl_socket);
             message msg = ReceiveRawMessage(ss_socket);
             if (msg.type == OK_CODE){
                 printf("SS Successful disconnect\n");
@@ -114,7 +109,7 @@ int TerminalHandler(fd_set read_fds, int sl_socket, int ss_socket) {
         
         // check failure: checa se há pane elétrica, e onde
         if (strncmp(buffer, "check failure", 12) == 0) {
-            SendMessage(REQ_SENSSTATUS, ss_id, ss_socket);
+            SendMessage(REQ_SENSSTATUS, my_id, ss_socket);
             message msg = ReceiveRawMessage(ss_socket);
             if (msg.type == RES_SENSSTATUS) {
                 if (strncmp(msg.payload, "1", 1) == 0) {
@@ -137,7 +132,7 @@ int TerminalHandler(fd_set read_fds, int sl_socket, int ss_socket) {
         
         // locate: checa onde o sensor está
         if (strncmp(buffer, "locate", 6) == 0) {
-            SendMessage(REQ_SENSLOC, sl_id, sl_socket);
+            SendMessage(REQ_SENSLOC, my_id, sl_socket);
             message msg = ReceiveRawMessage(sl_socket);
             if (msg.type == RES_SENSLOC) {
                 printf("Current sensor location: %s\n", msg.payload);
@@ -155,7 +150,7 @@ int TerminalHandler(fd_set read_fds, int sl_socket, int ss_socket) {
             if (token != NULL) {
                 token[strcspn(token, "\n")] = '\0';
                 char payload[MAX_MSG_SIZE];
-                snprintf(payload, MAX_MSG_SIZE, "%s@%s", sl_id, token);
+                snprintf(payload, MAX_MSG_SIZE, "%s@%s", my_id, token);
                 
                 SendMessage(REQ_LOCLIST, payload, sl_socket);
                 message msg = ReceiveRawMessage(sl_socket);
@@ -195,7 +190,7 @@ int main(int argc, char **argv) {
     }
 
     // Gerando ID de localização aleatório, conectando aos servidores e recebendo ID
-    location_id = (rand() % 10) + '0';
+    GenerateRandomID(my_id);
     sl_socket = ServerConnect(ip, sl_port);
     ss_socket = ServerConnect(ip, ss_port);
     if (sl_socket < 0 || ss_socket < 0) return 1;
