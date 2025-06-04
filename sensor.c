@@ -1,4 +1,4 @@
-#include "common.c"
+#include "common2.c"
 
 char my_id[ID_LEN + 1];
 
