@@ -1,4 +1,4 @@
-#include "common2.c"
+#include "common.c"
 
 char my_id[ID_LEN + 1];
 
@@ -28,34 +28,7 @@ int ServerConnect(char *ip, int port) {
         error("ERROR connecting");
     }
 
-    // // Estabelecendo conexão com os servidores
-    // if (port == SL_CLIENT_LISTEN_PORT_DEFAULT){
-    //     SendMessage(REQ_CONNSEN, &location_id, sock);
-    //     message msg = ReceiveRawMessage(sock);
-    //     if (msg.type == RES_CONNSEN){
-    //         strncpy(my_id, msg.payload, ID_LEN);
-    //         my_id[ID_LEN] = '\0';
-    //         printf("SL New ID: %s\n", my_id);
-    //     }
-    //     else if (msg.type == ERROR_CODE){
-    //         printf("Received error %s from server\n", msg.payload);
-    //         return -1;
-    //     }
-    // }
-    // else if (port == SS_CLIENT_LISTEN_PORT_DEFAULT){
-    //     SendMessage(REQ_CONNSEN, my_id, sock);
-    //     message msg = ReceiveRawMessage(sock);
-    //     if (msg.type == RES_CONNSEN){
-    //         strncpy(ss_id, my_id, ID_LEN);
-    //         ss_id[ID_LEN] = '\0';
-    //         printf("SS New ID: %s\n", ss_id);
-    //     }
-    //     else if (msg.type == ERROR_CODE){
-    //         printf("Received error %s from server\n", msg.payload);
-    //         return -1;
-    //     }
-    // }
-    // printf("My ID: %s\n", my_id);
+    // Estabelecendo conexão com os servidores
     SendMessage(REQ_CONNSEN, my_id, sock);
     message msg = ReceiveRawMessage(sock);
     if (msg.type == RES_CONNSEN){
@@ -109,6 +82,7 @@ int TerminalHandler(fd_set read_fds, int sl_socket, int ss_socket) {
         
         // check failure: checa se há pane elétrica, e onde
         if (strncmp(buffer, "check failure", 12) == 0) {
+            printf("Sending REQ_SENSSTATUS %s\n", my_id);
             SendMessage(REQ_SENSSTATUS, my_id, ss_socket);
             message msg = ReceiveRawMessage(ss_socket);
             if (msg.type == RES_SENSSTATUS) {
@@ -128,10 +102,14 @@ int TerminalHandler(fd_set read_fds, int sl_socket, int ss_socket) {
             else if (msg.type == ERROR_CODE) {
                 printf("Sensor not found\n");
             }
+            else if (msg.type == OK_CODE && strncmp(msg.payload, OK_STATUS_0, strlen(OK_STATUS_0)) == 0) {
+                printf("OK(3)\n");
+            }
         }
         
         // locate: checa onde o sensor está
         if (strncmp(buffer, "locate", 6) == 0) {
+            printf("Sending REQ_SENSLOC %s\n", my_id);
             SendMessage(REQ_SENSLOC, my_id, sl_socket);
             message msg = ReceiveRawMessage(sl_socket);
             if (msg.type == RES_SENSLOC) {
@@ -149,10 +127,8 @@ int TerminalHandler(fd_set read_fds, int sl_socket, int ss_socket) {
             
             if (token != NULL) {
                 token[strcspn(token, "\n")] = '\0';
-                char payload[MAX_MSG_SIZE];
-                snprintf(payload, MAX_MSG_SIZE, "%s@%s", my_id, token);
-                
-                SendMessage(REQ_LOCLIST, payload, sl_socket);
+                printf("Sending REC_LOCLIST %s\n", token);
+                SendMessage(REQ_LOCLIST, token, sl_socket);
                 message msg = ReceiveRawMessage(sl_socket);
                 if (msg.type == RES_LOCLIST) {
                     printf("Sensors at location %s: %s\n", token, msg.payload);
@@ -193,6 +169,7 @@ int main(int argc, char **argv) {
     GenerateRandomID(my_id);
     sl_socket = ServerConnect(ip, sl_port);
     ss_socket = ServerConnect(ip, ss_port);
+    printf("OK(2)\n");
     if (sl_socket < 0 || ss_socket < 0) return 1;
 
     // Loop de mensagens e comandos do sistema
@@ -213,7 +190,7 @@ int main(int argc, char **argv) {
         if (STDIN_FILENO > max_fd) max_fd = STDIN_FILENO;
         int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
         if (activity < 0) {
-            perror("Erro em select");
+            error("CLI ERROR in select");
             break;
         }
 
@@ -222,7 +199,7 @@ int main(int argc, char **argv) {
             bzero(buffer, 256);
             n = read(ss_socket, buffer, 255);
             if (n <= 0) {
-                printf("SS desconectado.\n");
+                printf("SS disconnected.\n");
                 break;
             }
         }
@@ -232,7 +209,7 @@ int main(int argc, char **argv) {
             bzero(buffer, 256);
             n = read(sl_socket, buffer, 255);
             if (n <= 0) {
-                printf("SL desconectado.\n");
+                printf("SL disconnected.\n");
                 break;
             }
         }

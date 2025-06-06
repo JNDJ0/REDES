@@ -254,12 +254,14 @@ int PeerHandler(fd_set read_fds, int peer_socket, int role) {
                         // Caso o sensor esteja na lista, envia o status
                         if (strcmp(sensors[i].id, msg.payload) == 0) {
                             char location_area = CheckLocation(sensors[i].location) + '0';
+                            printf("Sending RES_CHECKALERT %c to SS\n", location_area);
                             SendMessage(RES_CHECKALERT, &location_area, peer_socket);
                             break;
                         }
                         else error_check++;
                     }
                     if (error_check == connected_sensors){
+                        printf("Sending ERROR_CODE %s to SS\n", ERROR_SENSOR_NOT_FOUND);
                         SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, peer_socket);
                     }
                 }
@@ -313,6 +315,7 @@ void SensorConnectionHandler(fd_set read_fds, int sensor_listener_socket, int pe
                 } 
                 // Caso não tenha espaço, envia erro
                 else {
+                    printf("Sending ERROR_CODE %s to sensor\n", ERROR_SENSOR_LIMIT_EXCEEDED);
                     SendMessage(ERROR_CODE, ERROR_SENSOR_LIMIT_EXCEEDED, new_socket);
                     close(new_socket);
                 }
@@ -341,6 +344,7 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
             switch(msg.type) {
                 // Recebendo requisição de desconexão do sensor
                 case REQ_DISCSEN:
+                    int error_check = 0;
                     for (int i = 0; i < connected_sensors; i++) {
                         // Caso o sensor esteja na lista, o remove
                         if (strcmp(sensors[i].id, msg.payload) == 0) {
@@ -353,6 +357,16 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
                             connected_sensors--;
                             break;
                         }
+                        else error_check++;
+                    }
+                    if (error_check == connected_sensors) {
+                        // Sensor não encontrado
+                        printf("Sending ERROR_CODE %s to sensor\n", ERROR_SENSOR_NOT_FOUND);
+                        SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, sensors[i].socket_fd);
+                    }
+                    else {
+                        // Envia mensagem de desconexão ao peer
+                        SendMessage(REQ_DISCPEER, sensors[i].id, peer_socket);
                     }
                     break;
 
@@ -363,14 +377,21 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
                         int status = sensors[i].status;
                         // Se for positivo, checa a localização do sensor
                         if (status) {
+                            printf("Sending REQ_CHECKALERT %s to SL\n", sensors[i].id);
                             SendMessage(REQ_CHECKALERT, sensors[i].id, peer_socket);
                             message alert_msg = ReceiveRawMessage(peer_socket);
                             if (alert_msg.type == RES_CHECKALERT) {
+                                printf("Sending RES_SENSSTATUS %s to sensor\n", sensors[i].id);
                                 SendMessage(RES_SENSSTATUS, alert_msg.payload, sensors[i].socket_fd);
                             }
                             else if (alert_msg.type == ERROR_CODE) {
+                                printf("Sending ERROR_CODE %s to sensor\n", ERROR_SENSOR_NOT_FOUND);
                                 SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, sensors[i].socket_fd);
                             }
+                        }
+                        else {
+                            printf("Sending OK_CODE %s to sensor\n", OK_STATUS_0);
+                            SendMessage(OK_CODE, OK_STATUS_0, sensors[i].socket_fd);
                         }
                     }   
                     break;
@@ -378,12 +399,19 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
                 // Recebendo requisição de localização do sensor
                 case REQ_SENSLOC:
                     if (role) {
-                        printf("REQ_SENSLOC %s\n", sensors[i].id);
+                        printf("REQ_SENSLOC %s\n", msg.payload);
+                        int error_check = 0;
                         for (int j = 0; j < connected_sensors; j++) {
                             if (strcmp(sensors[j].id, msg.payload) == 0) {
                                 char location = sensors[j].location + '0';
+                                printf("REQ_SENSLOC %s\n", sensors[i].id);
                                 SendMessage(RES_SENSLOC, &location, sensors[i].socket_fd);
                             }
+                            else error_check++;
+                        }
+                        if (error_check == connected_sensors) {
+                            printf("Sending ERROR_CODE %s to sensor\n", ERROR_SENSOR_NOT_FOUND);
+                            SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, sensors[i].socket_fd);
                         }
                     }
                     break;
@@ -391,29 +419,24 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
                 // Recebendo requisição de listar sensores na localização
                 case REQ_LOCLIST:
                     if (role) {
-                        char payload[MAX_MSG_SIZE];  
-                        strcpy(payload, msg.payload);  
-                        char *id = strtok(payload, "@");
-                        char *loc = strtok(NULL, "@");
-                        
-                        if (id != NULL && loc != NULL) {
-                            printf("REQ_LOCLIST %s %s\n", id, loc);
-                            char answer[MAX_MSG_SIZE] = "";
-                            int location = atoi(loc);
-                            for (int j = 0; j < connected_sensors; j++) {
-                                if (sensors[j].location == location) {    
-                                    if (strlen(answer) > 0) {
-                                        strcat(answer, ",");
-                                    }
-                                    strcat(answer, sensors[j].id);
+                        printf("REQ_LOCLIST %s\n", msg.payload);
+                        char answer[MAX_MSG_SIZE] = "";
+                        int location = atoi(msg.payload);
+                        for (int j = 0; j < connected_sensors; j++) {
+                            if (sensors[j].location == location) {    
+                                if (strlen(answer) > 0) {
+                                    strcat(answer, ", ");
                                 }
+                                strcat(answer, sensors[j].id);
                             }
-                            if (strlen(answer) > 0) {
-                                SendMessage(RES_LOCLIST, answer, sensors[i].socket_fd);
-                            } 
-                            else {
-                                SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, sensors[i].socket_fd);
-                            }
+                        }
+                        if (strlen(answer) > 0) {
+                            printf("Sending RES_LOCLIST %s to sensor\n", answer);
+                            SendMessage(RES_LOCLIST, answer, sensors[i].socket_fd);
+                        } 
+                        else {
+                            printf("Sending ERROR_CODE %s to sensor\n", ERROR_LOCATION_NOT_FOUND);
+                            SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, sensors[i].socket_fd);
                         }
                     }
                     break;
@@ -480,8 +503,8 @@ int main(int argc, char **argv) {
 
         // Checa entrada do terminal
         int flag = TerminalHandler(read_fds, peer_socket);
-        if (flag) break;
-
+        if (flag == 1) break;
+        
         // Checa requisições do peer
         flag = PeerHandler(read_fds, peer_socket, role);
         if (flag){

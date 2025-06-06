@@ -15,7 +15,6 @@
 #define MAX_PEERS 2
 #define MAX_SENSORS 15
 #define MAX_MSG_SIZE 500 
-#define P2P_PORT_DEFAULT 64000
 #define SL_CLIENT_LISTEN_PORT_DEFAULT 60000
 #define SS_CLIENT_LISTEN_PORT_DEFAULT 61000
 
@@ -30,21 +29,22 @@
 #define RES_CHECKALERT 37 // Requisição de alerta de status, com a localização do sensor
 #define REQ_SENSLOC 38 // Requisição de localização do sensor, com o ID do sensor
 #define RES_SENSLOC 39 // Resposta de localização do sensor, com o ID da localização
-#define REQ_LOCLIST 40 // Requisição de lista de locais, com o status (palpite) e o ID da localização
-#define RES_LOCLIST 41 // Resposta de lista de locais, com todos os IDs de sensores que tiverem o status na req
-#define REQ_SENSSTATUS 42 // Requisição de informação sobre o status do sensor. 
-#define RES_SENSSTATUS 43 // Resposta com o ID da região onde ocorre a falha, se houver.
+#define REQ_SENSSTATUS 40 // Requisição de informação sobre o status do sensor. 
+#define RES_SENSSTATUS 41 // Resposta com o ID da região onde ocorre a falha, se houver.
+#define REQ_LOCLIST 42 // Requisição de lista de locais, com o status (palpite) e o ID da localização
+#define RES_LOCLIST 43 // Resposta de lista de locais, com todos os IDs de sensores que tiverem o status na req
 
 #define OK_CODE 0 // Código de sucesso, onde o payload pode ser as mensagens de sucesso logo abaixo.
 #define OK_SUCCESSFUL_DISCONNECT "01"
 #define OK_SUCCESSFUL_CREATE "02"
-#define OK_SUCCESSFUL_UPDATE "03"
+#define OK_STATUS_0 "03"
 
 #define ERROR_CODE 255 // Código de erro, onde o payload pode ser as mensagens de erro logo abaixo.
 #define ERROR_PEER_LIMIT_EXCEEDED "01"
 #define ERROR_PEER_NOT_FOUND "02"
 #define ERROR_SENSOR_LIMIT_EXCEEDED "09"
 #define ERROR_SENSOR_NOT_FOUND "10"
+#define ERROR_LOCATION_NOT_FOUND "11"
 
 typedef struct {
     int type;

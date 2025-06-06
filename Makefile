@@ -2,12 +2,12 @@ CC = gcc
 
 CFLAGS = -g
 
-HDRS = common2.c
+HDRS = common.c
 
 all: server sensor
 
-server: server2.c $(HDRS)
-	$(CC) $(CFLAGS) -o server server2.c
+server: server.c $(HDRS)
+	$(CC) $(CFLAGS) -o server server.c
 
 sensor: sensor.c $(HDRS)
 	$(CC) $(CFLAGS) -o sensor sensor.c
