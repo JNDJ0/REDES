@@ -109,14 +109,20 @@ int TerminalHandler(fd_set read_fds, int sl_socket, int ss_socket) {
         
         // locate: checa onde o sensor está
         if (strncmp(buffer, "locate", 6) == 0) {
-            printf("Sending REQ_SENSLOC %s\n", my_id);
-            SendMessage(REQ_SENSLOC, my_id, sl_socket);
-            message msg = ReceiveRawMessage(sl_socket);
-            if (msg.type == RES_SENSLOC) {
-                printf("Current sensor location: %s\n", msg.payload);
-            }
-            else if (msg.type == ERROR_CODE) {
-                printf("Sensor not found\n");
+            char *token = strtok(buffer, " ");
+            token = strtok(NULL, " ");  
+
+            if (token != NULL) {
+                token[strcspn(token, "\n")] = '\0';
+                printf("Sending REQ_SENSLOC %s\n", token);
+                SendMessage(REQ_SENSLOC, token, sl_socket);
+                message msg = ReceiveRawMessage(sl_socket);
+                if (msg.type == RES_SENSLOC) {
+                    printf("Current sensor location: %s\n", msg.payload);
+                }
+                else if (msg.type == ERROR_CODE && strncmp(msg.payload, ERROR_SENSOR_NOT_FOUND, strlen(ERROR_SENSOR_NOT_FOUND)) == 0) {
+                    printf("Sensor not found\n");
+                }
             }
         }
         
