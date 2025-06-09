@@ -74,7 +74,7 @@ int P2PConnect(char* ip, int port) {
         struct sockaddr_in my_listen_addr;
         bzero((char *)&my_listen_addr, sizeof(my_listen_addr));
         my_listen_addr.sin_family = AF_INET;
-        if (inet_pton(AF_INET, ip, &peer_addr.sin_addr) <= 0) {
+        if (inet_pton(AF_INET, ip, &my_listen_addr.sin_addr) <= 0) {
             close(listener_socket);
             error("P2P: Invalid peer target IP address");
         }
