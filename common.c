@@ -132,8 +132,7 @@ int CheckLocation(int location){
         return 3;
     }
     // Oeste
-    else if (location >= 8 && location < 10) {
+    else if (location >= 8 && location <= 10) {
         return 4;
     }
-    return 0;
 }
