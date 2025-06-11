@@ -39,8 +39,8 @@ int ServerConnect(char *ip, int port) {
             printf("SS New ID: %s\n", my_id);
         }
     }
-    else if (msg.type == ERROR_CODE){
-        printf("Received error %s from server\n", msg.payload);
+    else if (msg.type == ERROR_CODE && strncmp(msg.payload, ERROR_SENSOR_LIMIT_EXCEEDED, strlen(ERROR_SENSOR_LIMIT_EXCEEDED)) == 0) {
+        printf("Sensor limit exceeded.\n");
         return -1;
     }
 
@@ -99,7 +99,7 @@ int TerminalHandler(fd_set read_fds, int sl_socket, int ss_socket) {
                     printf("Alert received from location: 4 (Oeste)\n");
                 } 
             }
-            else if (msg.type == ERROR_CODE) {
+            else if (msg.type == ERROR_CODE && strncmp(msg.payload, ERROR_SENSOR_NOT_FOUND, strlen(ERROR_SENSOR_NOT_FOUND)) == 0) {
                 printf("Sensor not found\n");
             }
             else if (msg.type == OK_CODE && strncmp(msg.payload, OK_STATUS_0, strlen(OK_STATUS_0)) == 0) {
@@ -139,7 +139,7 @@ int TerminalHandler(fd_set read_fds, int sl_socket, int ss_socket) {
                 if (msg.type == RES_LOCLIST) {
                     printf("Sensors at location %s: %s\n", token, msg.payload);
                 }
-                else if (msg.type == ERROR_CODE) {
+                else if (msg.type == ERROR_CODE && strncmp(msg.payload, ERROR_LOCATION_NOT_FOUND, strlen(ERROR_LOCATION_NOT_FOUND)) == 0) {
                     printf("Location not found\n");
                 }
             }
@@ -174,9 +174,10 @@ int main(int argc, char **argv) {
     // Gerando ID de localização aleatório, conectando aos servidores e recebendo ID
     GenerateRandomID(my_id);
     sl_socket = ServerConnect(ip, sl_port);
+    if (sl_socket < 0) return 1;
     ss_socket = ServerConnect(ip, ss_port);
+    if (ss_socket < 0) return 1;
     printf("OK(2)\n");
-    if (sl_socket < 0 || ss_socket < 0) return 1;
 
     // Loop de mensagens e comandos do sistema
     fd_set read_fds;

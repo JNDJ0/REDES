@@ -14,12 +14,117 @@ sensor_info sensors[MAX_SENSORS];
 int connected_sensors;
 
 /**
+ * @brief Cria um socket de escuta para conexões P2P.
+ * 
+ * @param ip O endereço IP para escutar.
+ * @param port A porta para escutar.
+ * @return int O socket de escuta.
+ */
+int P2PListener(char* ip, int port){
+    int listener_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (listener_socket < 0) {
+        error("P2P: ERROR opening listener socket");
+    }
+    int optval = 1;
+    setsockopt(listener_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+    setsockopt(listener_socket, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));  
+    struct sockaddr_in my_listen_addr;
+    bzero((char *)&my_listen_addr, sizeof(my_listen_addr));
+    my_listen_addr.sin_family = AF_INET;
+    if (inet_pton(AF_INET, ip, &my_listen_addr.sin_addr) <= 0) {
+        close(listener_socket);
+        error("P2P: Invalid peer target IP address");
+    }
+    my_listen_addr.sin_port = htons(port);
+    if (bind(listener_socket, (struct sockaddr *)&my_listen_addr, sizeof(my_listen_addr)) < 0) {
+        error("P2P: ERROR on binding listener socket");
+    }
+    if (listen(listener_socket, 1) < 0) {
+        close(listener_socket);
+        error("P2P: ERROR on listen");
+    }
+    return listener_socket;
+}
+
+/**
+ * @brief Aceita uma conexão de um peer.
+ * 
+ * @param listener_socket O socket de escuta.
+ * @return int O socket do peer conectado ou -1 em caso de erro.
+ */
+int P2PAccept(int listener_socket){
+    // Implementando select para permitir que o servidor digite kill e encerre as tentativas
+    fd_set read_fds;
+    int max_fd = (listener_socket > STDIN_FILENO) ? listener_socket : STDIN_FILENO;
+    while(1){
+        FD_ZERO(&read_fds);
+        // Escutando por um novo peer
+        FD_SET(listener_socket, &read_fds);
+        // Escutando por entrada do terminal
+        FD_SET(STDIN_FILENO, &read_fds);
+        // Trocando prioridade de leitura
+        if (listener_socket > max_fd) max_fd = listener_socket;
+        if (STDIN_FILENO > max_fd) max_fd = STDIN_FILENO;
+        int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+        if (activity < 0) {
+            error("P2P: ERROR in select");
+            close(listener_socket);
+            return -1;
+        }
+        // Checa entrada do terminal
+        if (FD_ISSET(STDIN_FILENO, &read_fds)) {
+            char buffer[256];
+            bzero(buffer, 256);
+            fgets(buffer, 255, stdin);
+            if (strncmp(buffer, "kill", 4) == 0) {
+                close(listener_socket);
+                return -1; 
+            }
+        }
+        // Checa novas conexões de peers
+        if (FD_ISSET(listener_socket, &read_fds)) {
+            // Aceitando a conexão feita
+            struct sockaddr_in connected_peer_addr;
+            socklen_t peer_len = sizeof(connected_peer_addr);
+            int peer_socket = accept(listener_socket, (struct sockaddr *)&connected_peer_addr, &peer_len);
+            char connected_peer_ip_str[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &connected_peer_addr.sin_addr, connected_peer_ip_str, INET_ADDRSTRLEN);
+            // Conexão bem sucedida; necessário gerar e enviar o ID ao novo peer.
+            if (peer_socket >= 0) {
+                connected_peers++;
+                message msg = ReceiveRawMessage(peer_socket);
+                if (msg.type == REQ_CONNPEER) {
+                    // Gerando ID ao peer conectado
+                    GenerateRandomID(peer_id);
+                    printf("Peer %s connected\n", peer_id);
+                    SendMessage(RES_CONNPEER, peer_id, peer_socket);
+                    
+                    // Recebendo ID dado pelo peer conectado
+                    msg = ReceiveRawMessage(peer_socket);
+                    if (msg.type == RES_CONNPEER) {
+                        char* assigned_id = msg.payload;
+                        strncpy(my_id, assigned_id, ID_LEN);
+                        my_id[ID_LEN] = '\0';
+                        printf("New Peer ID: %s\n", my_id);
+                    }
+                    return peer_socket; 
+                }
+            }
+            else {
+                close(peer_socket);
+                error("P2P: ERROR on peer connection");
+            }
+            break;
+        }
+    }
+}
+/**
  * @brief Conecta a um peer em um endereço IP e porta especificados.
  * 
  * @param ip O endereço IP do peer.
  * @param port A porta do peer.
  * 
- * @return O socket do peer conectado ou -1 em caso de erro.
+ * @return O socket do peer conectado -1 caso dê erro no connect ou -2 caso dê erro de limite de peers.
  */
 int P2PConnect(char* ip, int port) {
     int peer_socket = -1;
@@ -57,105 +162,9 @@ int P2PConnect(char* ip, int port) {
             SendMessage(RES_CONNPEER, peer_id, peer_socket);
             return peer_socket;
         }
-    } 
-    else {
-        // Nenhum peer aberto; começar a ouvir por possíveis conexões
-        close(connector_socket); 
-        printf("No peers found, starting to listen...\n");
-
-        // Instancia socket para ouvir conexões
-        int listener_socket = socket(AF_INET, SOCK_STREAM, 0);
-        if (listener_socket < 0) {
-            error("P2P: ERROR opening listener socket");
-            return -1;
-        }
-        int optval = 1;
-        setsockopt(listener_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
-        struct sockaddr_in my_listen_addr;
-        bzero((char *)&my_listen_addr, sizeof(my_listen_addr));
-        my_listen_addr.sin_family = AF_INET;
-        if (inet_pton(AF_INET, ip, &my_listen_addr.sin_addr) <= 0) {
-            close(listener_socket);
-            error("P2P: Invalid peer target IP address");
-        }
-        my_listen_addr.sin_port = htons(port);
-        if (bind(listener_socket, (struct sockaddr *)&my_listen_addr, sizeof(my_listen_addr)) < 0) {
-            error("P2P: ERROR on binding listener socket"); 
-        }
-        if (listen(listener_socket, 1) < 0) { 
-            close(listener_socket);
-            error("P2P: ERROR on listen");
-        }
-    
-        // Implementando select para permitir que o servidor digite kill e encerre as tentativas
-        fd_set read_fds;
-        int max_fd = (listener_socket > STDIN_FILENO) ? listener_socket : STDIN_FILENO;
-        while(1){
-            FD_ZERO(&read_fds);
-            // Escutando por um novo peer
-            FD_SET(listener_socket, &read_fds);
-            // Escutando por entrada do terminal
-            FD_SET(STDIN_FILENO, &read_fds);
-
-            // Trocando prioridade de leitura
-            if (listener_socket > max_fd) max_fd = listener_socket;
-            if (STDIN_FILENO > max_fd) max_fd = STDIN_FILENO;
-
-            int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
-            if (activity < 0) {
-                error("P2P: ERROR in select");
-                close(listener_socket);
-                return -1;
-            }
-
-            // Checa entrada do terminal
-            if (FD_ISSET(STDIN_FILENO, &read_fds)) {
-                char buffer[256];
-                bzero(buffer, 256);
-                fgets(buffer, 255, stdin);
-                if (strncmp(buffer, "kill", 4) == 0) {
-                    close(listener_socket);
-                    return -1; 
-                }
-            }
-
-            // Checa novas conexões de peers
-            if (FD_ISSET(listener_socket, &read_fds)) {
-                // Aceitando a conexão feita
-                struct sockaddr_in connected_peer_addr;
-                socklen_t peer_len = sizeof(connected_peer_addr);
-                peer_socket = accept(listener_socket, (struct sockaddr *)&connected_peer_addr, &peer_len);
-                close(listener_socket);
-                char connected_peer_ip_str[INET_ADDRSTRLEN];
-                inet_ntop(AF_INET, &connected_peer_addr.sin_addr, connected_peer_ip_str, INET_ADDRSTRLEN);
-                
-                // Conexão bem sucedida; necessário gerar e enviar o ID ao novo peer.
-                if (peer_socket >= 0) {
-                    connected_peers++;
-                    message msg = ReceiveRawMessage(peer_socket);
-                    if (msg.type == REQ_CONNPEER) {
-                        // Gerando ID ao peer conectado
-                        GenerateRandomID(peer_id);
-                        printf("Peer %s connected\n", peer_id);
-                        SendMessage(RES_CONNPEER, peer_id, peer_socket);
-                        
-                        // Recebendo ID dado pelo peer conectado
-                        msg = ReceiveRawMessage(peer_socket);
-                        if (msg.type == RES_CONNPEER) {
-                            char* assigned_id = msg.payload;
-                            strncpy(my_id, assigned_id, ID_LEN);
-                            my_id[ID_LEN] = '\0';
-                            printf("New Peer ID: %s\n", my_id);
-                        }
-                        return peer_socket; 
-                    }
-                }
-                else {
-                    close(peer_socket);
-                    error("P2P: ERROR on peer connection");
-                }
-                break;
-            }
+        else if (msg.type == ERROR_CODE && strncmp(msg.payload, ERROR_PEER_LIMIT_EXCEEDED, strlen(ERROR_PEER_LIMIT_EXCEEDED)) == 0) {
+            printf("Peer limit exceeded.\n");
+            return -2;
         }
     }
 
@@ -204,7 +213,7 @@ int SensorConnect(char *ip, int port) {
  * 
  * @return 1 se o programa deve encerrar, 0 caso contrário.
  */
-int TerminalHandler(fd_set read_fds, int peer_socket) {
+int TerminalHandler(fd_set read_fds, int peer_socket, int listener_socket) {
     char buffer[256];
     // Checa entrada do terminal
     if (FD_ISSET(STDIN_FILENO, &read_fds)) {
@@ -217,8 +226,12 @@ int TerminalHandler(fd_set read_fds, int peer_socket) {
             if (msg.type == OK_CODE) {
                 printf("Peer %s disconnected.\n", peer_id);
                 close(peer_socket);
+                if (listener_socket > 0) close(listener_socket);
+                return 1; 
             }
-            return 1; 
+            else if(msg.type == ERROR_CODE && strncmp(msg.payload, ERROR_PEER_NOT_FOUND, strlen(ERROR_PEER_NOT_FOUND)) == 0) {
+                printf("Peer not found.\n");
+            }
         }
     }
     return 0;
@@ -241,9 +254,15 @@ int PeerHandler(fd_set read_fds, int peer_socket, int role) {
         switch (msg.type) {
             // Recebendo requisição de desconexão do peer
             case REQ_DISCPEER:
-                printf("Peer %s disconnected.\n", peer_id);
-                SendMessage(OK_CODE, OK_SUCCESSFUL_DISCONNECT, peer_socket);
-                return 1;
+                if (strcmp(msg.payload, peer_id) == 0){
+                    printf("Peer %s disconnected.\n", peer_id);
+                    SendMessage(OK_CODE, OK_SUCCESSFUL_DISCONNECT, peer_socket);
+                    return 1;
+                }
+                else {
+                    SendMessage(ERROR_CODE, ERROR_PEER_NOT_FOUND, peer_socket);
+                }
+                break;
 
             // Recebendo requisição de checar localização do sensor
             case REQ_CHECKALERT:
@@ -425,7 +444,7 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
                         } 
                         else {
                             printf("Sending ERROR_CODE %s to sensor\n", ERROR_LOCATION_NOT_FOUND);
-                            SendMessage(ERROR_CODE, ERROR_SENSOR_NOT_FOUND, sensors[i].socket_fd);
+                            SendMessage(ERROR_CODE, ERROR_LOCATION_NOT_FOUND, sensors[i].socket_fd);
                         }
                     }
                     break;
@@ -448,9 +467,10 @@ int main(int argc, char **argv) {
     char* ip;
     char buffer[256];
     struct sockaddr_in peer_addr;
-    int peer_port, sensor_port, n, sensor_listener_socket, peer_socket, max_fd;
+    int peer_port, sensor_port, n, sensor_listener_socket, listener_socket, peer_socket, max_fd;
     connected_peers = 0;
     connected_sensors = 0;
+    listener_socket = -1;
     
     // Lendo entradas do terminal e atribuindo papel
     ip = argv[1];
@@ -460,7 +480,16 @@ int main(int argc, char **argv) {
 
     // Conectando aos sockets do peer e do sensor
     peer_socket = P2PConnect(ip, peer_port);
-    if (peer_socket < 0) return 1;
+    if (peer_socket == -1){
+        printf("No peers found, starting to listen...\n");
+        listener_socket = P2PListener(ip, peer_port);
+        peer_socket = P2PAccept(listener_socket);
+        if (peer_socket < 0) return 1;
+    }
+    // Erro de limite excedido
+    else if (peer_socket == -2) {
+        return 1;
+    }
     sensor_listener_socket = SensorConnect(ip, sensor_port);
     
     // Loop de mensagens e comandos do sistema
@@ -474,6 +503,8 @@ int main(int argc, char **argv) {
         FD_SET(peer_socket, &read_fds);
         // Aguardando entradas no terminal 
         FD_SET(STDIN_FILENO, &read_fds);
+        // Aguardando listener
+        if (listener_socket > 0) FD_SET(listener_socket, &read_fds);
         for (int i = 0; i < connected_sensors; i++) {
             FD_SET(sensors[i].socket_fd, &read_fds);
         }
@@ -484,6 +515,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < connected_sensors; i++) {
             if (sensors[i].socket_fd > max_fd) max_fd = sensors[i].socket_fd;
         }
+        if (listener_socket > max_fd) max_fd = listener_socket;
         int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
         if (activity < 0) {
             error("Erro em select");
@@ -491,13 +523,15 @@ int main(int argc, char **argv) {
         }
 
         // Checa entrada do terminal
-        int flag = TerminalHandler(read_fds, peer_socket);
+        int flag = TerminalHandler(read_fds, peer_socket, listener_socket);
         if (flag == 1) break;
         
         // Checa requisições do peer
         flag = PeerHandler(read_fds, peer_socket, role);
         if (flag){
-            peer_socket = P2PConnect(ip, peer_port);
+            printf("No peers found, starting to listen...\n");
+            if (listener_socket < 0) listener_socket = P2PListener(ip, peer_port);
+            peer_socket = P2PAccept(listener_socket);
             if (peer_socket < 0) return 1;
         }
 
@@ -506,6 +540,15 @@ int main(int argc, char **argv) {
 
         // Checa mensagens dos sensores
         SensorMessageHandler(read_fds, sensors, peer_socket, role);
+
+        // Caso o listener esteja aberto, rejeita novas conexões
+        if (FD_ISSET(listener_socket, &read_fds)) {
+            struct sockaddr_in connected_peer_addr;
+            socklen_t peer_len = sizeof(connected_peer_addr);
+            int new_socket = accept(listener_socket, (struct sockaddr *)&connected_peer_addr, &peer_len);
+            SendMessage(ERROR_CODE, ERROR_PEER_LIMIT_EXCEEDED, new_socket);
+            close(new_socket);
+        }
     }
 
     // Encerra conexões
