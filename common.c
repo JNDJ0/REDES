@@ -12,7 +12,7 @@
 #include <sys/select.h>
 
 #define ID_LEN 10
-#define MAX_PEERS 2
+#define MAX_PEERS 15
 #define MAX_SENSORS 2
 #define MAX_MSG_SIZE 500 
 #define SL_CLIENT_LISTEN_PORT_DEFAULT 60000

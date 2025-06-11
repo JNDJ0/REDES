@@ -81,7 +81,7 @@ int TerminalHandler(fd_set read_fds, int sl_socket, int ss_socket) {
         }
         
         // check failure: checa se há pane elétrica, e onde
-        if (strncmp(buffer, "check failure", 12) == 0) {
+        if (strncmp(buffer, "Check failure", 12) == 0) {
             printf("Sending REQ_SENSSTATUS %s\n", my_id);
             SendMessage(REQ_SENSSTATUS, my_id, ss_socket);
             message msg = ReceiveRawMessage(ss_socket);
