@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "common.c"
 
 /*
@@ -77,6 +78,7 @@ int P2PAccept(int listener_socket){
             bzero(buffer, 256);
             fgets(buffer, 255, stdin);
             if (strncmp(buffer, "kill", 4) == 0) {
+                printf("Successful disconnect\n");
                 close(listener_socket);
                 return -1; 
             }
@@ -124,7 +126,7 @@ int P2PAccept(int listener_socket){
  * @param ip O endereço IP do peer.
  * @param port A porta do peer.
  * 
- * @return O socket do peer conectado -1 caso dê erro no connect ou -2 caso dê erro de limite de peers.
+ * @return O socket do peer conectado; -1 caso dê erro no connect; -2 caso dê erro de limite de peers.
  */
 int P2PConnect(char* ip, int port) {
     int peer_socket = -1;
@@ -224,9 +226,7 @@ int TerminalHandler(fd_set read_fds, int peer_socket, int listener_socket) {
             SendMessage(REQ_DISCPEER, my_id, peer_socket);
             message msg = ReceiveRawMessage(peer_socket);
             if (msg.type == OK_CODE) {
-                printf("Peer %s disconnected.\n", peer_id);
-                close(peer_socket);
-                if (listener_socket > 0) close(listener_socket);
+                printf("Successful disconnect\nPeer %s disconnected.\n", peer_id);
                 return 1; 
             }
             else if(msg.type == ERROR_CODE && strncmp(msg.payload, ERROR_PEER_NOT_FOUND, strlen(ERROR_PEER_NOT_FOUND)) == 0) {
@@ -273,6 +273,7 @@ int PeerHandler(fd_set read_fds, int peer_socket, int role) {
                         // Caso o sensor esteja na lista, envia o status
                         if (strcmp(sensors[i].id, msg.payload) == 0) {
                             char location_area = CheckLocation(sensors[i].location) + '0';
+                            printf("Found location of sensor %s: Location %c\n", sensors[i].id, location_area);
                             printf("Sending RES_CHECKALERT %c to SS\n", location_area);
                             SendMessage(RES_CHECKALERT, &location_area, peer_socket);
                             break;
@@ -319,7 +320,7 @@ void SensorConnectionHandler(fd_set read_fds, int sensor_listener_socket, int pe
                     sensor_info new_sensor;
                     if (role) {
                         strncpy(new_sensor.id, msg.payload, ID_LEN);
-                        new_sensor.location = rand() % 10;
+                        new_sensor.location = (rand() % 10) + 1;
                         printf("Client %s added (Loc: %d)\n", new_sensor.id, new_sensor.location);
                     }
                     else {
@@ -385,6 +386,7 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
                         int status = sensors[i].status;
                         // Se for positivo, checa a localização do sensor
                         if (status) {
+                            printf("Sensor %s status = 1 (failure detected)\n", sensors[i].id);
                             printf("Sending REQ_CHECKALERT %s to SL\n", sensors[i].id);
                             SendMessage(REQ_CHECKALERT, sensors[i].id, peer_socket);
                             message alert_msg = ReceiveRawMessage(peer_socket);
@@ -398,6 +400,7 @@ void SensorMessageHandler(fd_set read_fds, sensor_info *sensors, int peer_socket
                             }
                         }
                         else {
+                            printf("Sensor %s status = 0 (no failure detected)\n", sensors[i].id);
                             printf("Sending OK_CODE %s to sensor\n", OK_STATUS_0);
                             SendMessage(OK_CODE, OK_STATUS_0, sensors[i].socket_fd);
                         }
@@ -518,7 +521,7 @@ int main(int argc, char **argv) {
         if (listener_socket > max_fd) max_fd = listener_socket;
         int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
         if (activity < 0) {
-            error("Erro em select");
+            error("Error in select");
             break;
         }
 
@@ -529,10 +532,18 @@ int main(int argc, char **argv) {
         // Checa requisições do peer
         flag = PeerHandler(read_fds, peer_socket, role);
         if (flag){
+            // Peer disconectado, necessário reiniciar conexões
+            for (int i = 0; i < connected_sensors; i++) {
+                close(sensors[i].socket_fd);
+            }
+            close(sensor_listener_socket);
+            connected_sensors = 0;
             printf("No peers found, starting to listen...\n");
             if (listener_socket < 0) listener_socket = P2PListener(ip, peer_port);
             peer_socket = P2PAccept(listener_socket);
             if (peer_socket < 0) return 1;
+            sensor_listener_socket = SensorConnect(ip, sensor_port);
+            if (sensor_listener_socket < 0) return 1;
         }
 
         // Checa novas conexões de sensores
@@ -543,6 +554,7 @@ int main(int argc, char **argv) {
 
         // Caso o listener esteja aberto, rejeita novas conexões
         if (FD_ISSET(listener_socket, &read_fds)) {
+            printf("Sending ERROR_CODE %s to server attempting to connect\n", ERROR_PEER_LIMIT_EXCEEDED);
             struct sockaddr_in connected_peer_addr;
             socklen_t peer_len = sizeof(connected_peer_addr);
             int new_socket = accept(listener_socket, (struct sockaddr *)&connected_peer_addr, &peer_len);
@@ -557,5 +569,6 @@ int main(int argc, char **argv) {
     }
     close(sensor_listener_socket);
     close(peer_socket);
+    if (listener_socket > 0) close(listener_socket);
     return 0; 
 }
